@@ -126,10 +126,10 @@ def load_data(path: str):
 
 
 @st.cache_data(show_spinner=False, ttl=86400)
-def load_historical_api(year: int):
-    # API results are cached for one day so Streamlit reruns do not repeatedly
-    # download a heavy national resource. Source provenance remains attached.
-    return load_historical_station_demand(int(year))
+def load_historical_api(year: int, station_ids: tuple[str, ...]):
+    # v0.9.1: cache is scoped to year + selected city's StationIds. The API
+    # query never needs to load the full national historical resource.
+    return load_historical_station_demand(int(year), station_ids=station_ids)
 
 
 with st.sidebar:
@@ -403,7 +403,17 @@ with tab_changes:
     else:
         try:
             with st.spinner(f"מוריד ומעבד את מאגר התיקופים לשנת {hist_year}..."):
-                hist_source = load_historical_api(int(hist_year))
+                city_station_ids = tuple(sorted({
+                    str(v).replace(".0", "").strip()
+                    for v in result.stations.loc[
+                        result.stations["city_name"].astype(str) == str(city),
+                        "station_demand_id",
+                    ].tolist()
+                    if str(v).strip() not in {"", "nan", "None"}
+                }))
+                if not city_station_ids:
+                    raise RuntimeError("No station-demand IDs are available for the selected city")
+                hist_source = load_historical_api(int(hist_year), city_station_ids)
                 replay = historical_city_replay(result, city, int(hist_year), historical=hist_source)
                 hist_cmp = compare_historical_replay_to_current(result, city, replay)
 
@@ -528,7 +538,7 @@ with tab_history:
             fig.update_layout(height=330, margin=dict(l=10,r=10,t=20,b=10))
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-    st.warning("ב-Community Cloud אחסון קבצים מקומי אינו מסד נתונים קבוע ועלול להימחק בעת redeploy/restart. ב-v0.9 זה עדיין מתאים ל-POC; לפני שימוש ארגוני נעביר את ה-registry וה-snapshots לאחסון מתמשך.")
+    st.warning("ב-Community Cloud אחסון קבצים מקומי אינו מסד נתונים קבוע ועלול להימחק בעת redeploy/restart. ב-v0.9.1 זה עדיין מתאים ל-POC; לפני שימוש ארגוני נעביר את ה-registry וה-snapshots לאחסון מתמשך.")
 
 with st.expander("מתודולוגיה ו-Provenance"):
     st.markdown("""

@@ -11,9 +11,11 @@ import numpy as np
 import pandas as pd
 import requests
 
-HISTORICAL_ENGINE_VERSION = "0.9"
+HISTORICAL_ENGINE_VERSION = "0.9.1"
 DATASTORE_URL = "https://data.gov.il/api/3/action/datastore_search"
-DEFAULT_PAGE_SIZE = 10000
+DATASTORE_SQL_URL = "https://data.gov.il/api/3/action/datastore_search_sql"
+DEFAULT_PAGE_SIZE = 5000
+SQL_STATION_CHUNK_SIZE = 80
 
 # Official station-validation resources supplied for TIOE Shelter historical demand.
 HISTORICAL_RESOURCES = {
@@ -125,6 +127,94 @@ def fetch_datastore_resource(
 
     return pd.DataFrame.from_records(records)
 
+
+
+def _sql_literal(value: str) -> str:
+    """Return a conservative SQL literal for CKAN datastore_search_sql."""
+    s = _clean_id(value)
+    if not s:
+        return "NULL"
+    if s.lstrip("-").isdigit():
+        return s
+    return "'" + s.replace("'", "''") + "'"
+
+
+def fetch_datastore_resource_for_stations(
+    resource_id: str,
+    station_ids: Iterable[str],
+    *,
+    chunk_size: int = SQL_STATION_CHUNK_SIZE,
+    page_size: int = DEFAULT_PAGE_SIZE,
+    timeout_sec: int = 45,
+    max_retries: int = 3,
+    session: Optional[requests.Session] = None,
+) -> pd.DataFrame:
+    """Fetch only requested StationId rows through CKAN SQL.
+
+    v0.9.1 memory-safety rule: the Streamlit app must never download the full
+    national historical resource merely to analyze one city. Station IDs are
+    taken from the CURRENT city's audited station crosswalk and queried in
+    bounded groups. This keeps both network traffic and peak RAM bounded.
+    """
+    ids = []
+    seen = set()
+    for value in station_ids or []:
+        sid = _clean_id(value)
+        if sid and sid not in seen:
+            seen.add(sid)
+            ids.append(sid)
+    if not ids:
+        return pd.DataFrame()
+
+    sess = session or requests.Session()
+    frames: list[pd.DataFrame] = []
+    wanted_cols = [
+        '"StationId"', '"StationName"', '"year_key"', '"month_key"',
+        *[f'"day_{i}"' for i in range(1, 32)],
+    ]
+    select_cols = ",".join(wanted_cols)
+    table = '"' + str(resource_id).replace('"', '""') + '"'
+
+    for start in range(0, len(ids), int(chunk_size)):
+        chunk = ids[start:start + int(chunk_size)]
+        literals = ",".join(_sql_literal(v) for v in chunk)
+        offset = 0
+        while True:
+            sql = (
+                f"SELECT {select_cols} FROM {table} "
+                f'WHERE "StationId" IN ({literals}) '
+                f"LIMIT {int(page_size)} OFFSET {int(offset)}"
+            )
+            payload = None
+            last_exc = None
+            for attempt in range(int(max_retries)):
+                try:
+                    resp = sess.get(DATASTORE_SQL_URL, params={"sql": sql}, timeout=timeout_sec)
+                    resp.raise_for_status()
+                    payload = resp.json()
+                    if not payload.get("success"):
+                        raise RuntimeError(f"CKAN SQL success=false: {payload}")
+                    break
+                except Exception as exc:
+                    last_exc = exc
+                    if attempt + 1 < int(max_retries):
+                        time.sleep(0.8 * (attempt + 1))
+            if payload is None:
+                raise RuntimeError(
+                    f"Historical API query failed for station chunk {start // int(chunk_size) + 1}: {last_exc}"
+                )
+
+            batch = (payload.get("result", {}) or {}).get("records", []) or []
+            if batch:
+                frames.append(pd.DataFrame.from_records(batch))
+            got = len(batch)
+            if got < int(page_size):
+                break
+            offset += got
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
 
 def normalize_station_datastore_records(raw: pd.DataFrame, expected_year: Optional[int] = None) -> pd.DataFrame:
     """Convert station/month/time-bucket validations to average weekday OnDay.
@@ -241,6 +331,7 @@ def load_historical_station_demand(
     year: int,
     *,
     resource_id: Optional[str] = None,
+    station_ids: Optional[Iterable[str]] = None,
     session: Optional[requests.Session] = None,
 ) -> HistoricalDemandResult:
     year = int(year)
@@ -251,7 +342,12 @@ def load_historical_station_demand(
             fetched_at_utc=pd.Timestamp.utcnow().isoformat(), provenance="UNAVAILABLE",
             status="UNAVAILABLE", message=f"No resource configured for {year}",
         )
-    raw = fetch_datastore_resource(rid, session=session)
+    if station_ids is not None:
+        raw = fetch_datastore_resource_for_stations(rid, station_ids, session=session)
+    else:
+        # Backward-compatible programmatic path. UI v0.9.1 always supplies city
+        # station IDs and therefore never performs a national full-table fetch.
+        raw = fetch_datastore_resource(rid, session=session)
     normalized = normalize_station_datastore_records(raw, expected_year=year)
     return HistoricalDemandResult(
         year=year,
