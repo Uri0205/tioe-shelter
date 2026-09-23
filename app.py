@@ -22,6 +22,9 @@ _REQUIRED_PORTFOLIO_API = (
     "map_points",
     "save_current_snapshot",
     "save_opportunity_state",
+    "historical_city_replay",
+    "compare_historical_replay_to_current",
+    "load_historical_station_demand",
 )
 _missing_portfolio_api = [
     name for name in _REQUIRED_PORTFOLIO_API
@@ -41,8 +44,11 @@ city_opportunities = portfolio_module.city_opportunities
 map_points = portfolio_module.map_points
 save_current_snapshot = portfolio_module.save_current_snapshot
 save_opportunity_state = portfolio_module.save_opportunity_state
+historical_city_replay = portfolio_module.historical_city_replay
+compare_historical_replay_to_current = portfolio_module.compare_historical_replay_to_current
+load_historical_station_demand = portfolio_module.load_historical_station_demand
 
-APP_VERSION = "0.8.1"
+APP_VERSION = "0.9"
 USER_STATUSES = ["טרם נבדקה", "בבדיקה", "נדרשת בדיקת שטח", "אושרה", "יושמה", "לא רלוונטית"]
 SYSTEM_HE = {
     "NEW": "חדשה",
@@ -51,6 +57,11 @@ SYSTEM_HE = {
     "RESOLVED_INFRASTRUCTURE_CHANGED": "שינוי תשתית זוהה",
     "NO_LONGER_PRIORITY_CANDIDATE": "כבר לא בעדיפות",
     "DROPPED_FROM_CURRENT_SET": "יצאה מהסט הנוכחי",
+    "NEW_SINCE_HISTORICAL_REPLAY": "חדשה ביחס לשנה ההיסטורית",
+    "NO_LONGER_CURRENT_OPPORTUNITY": "הייתה בריפליי ההיסטורי ואינה נוכחית",
+    "PERSISTING_STABLE": "נמשכת ללא שינוי מהותי",
+    "STRENGTHENED": "התחזקה",
+    "WEAKENED": "נחלשה",
 }
 
 st.set_page_config(page_title="TIOE | תיק הסככות", page_icon="🚏", layout="wide", initial_sidebar_state="expanded")
@@ -112,6 +123,13 @@ button[kind="primary"], button[kind="secondary"] { font-size:1rem !important; fo
 def load_data(path: str):
     # v0.7: analytical load does not silently create history. Snapshot saving is explicit.
     return run_portfolio(path, save_history=False)
+
+
+@st.cache_data(show_spinner=False, ttl=86400)
+def load_historical_api(year: int):
+    # API results are cached for one day so Streamlit reruns do not repeatedly
+    # download a heavy national resource. Source provenance remains attached.
+    return load_historical_station_demand(int(year))
 
 
 with st.sidebar:
@@ -374,7 +392,80 @@ with tab_opps:
             )
 
 with tab_changes:
-    st.markdown("## מה השתנה מאז ה-Snapshot הקודם?")
+    st.markdown("## השוואה היסטורית של ביקוש")
+    st.write("השוואת 2024/2025 למצב הנוכחי באמצעות נתוני תיקופים רשמיים ברמת תחנה.")
+    st.info("חשוב: למאגרים ההיסטוריים יש ביקוש תחנתי, אך כאן לא נטען שמלאי הסככות ההיסטורי ידוע. לכן זהו **Historical Demand Replay**: ביקוש היסטורי מורץ על מלאי התשתית הנוכחי. התוצאה מסומנת SIMULATED.")
+
+    hist_year = st.selectbox("שנת ביקוש להשוואה", [2025, 2024], index=0, key="historical_year")
+    load_hist = st.checkbox("טען נתוני API היסטוריים", value=False, key="load_historical_api")
+    if not load_hist:
+        st.caption("הטעינה אינה אוטומטית כדי לא להאט את האפליקציה. לאחר הטעינה התוצאה נשמרת ב-cache למשך 24 שעות.")
+    else:
+        try:
+            with st.spinner(f"מוריד ומעבד את מאגר התיקופים לשנת {hist_year}..."):
+                hist_source = load_historical_api(int(hist_year))
+                replay = historical_city_replay(result, city, int(hist_year), historical=hist_source)
+                hist_cmp = compare_historical_replay_to_current(result, city, replay)
+
+            if replay.get("status") != "AVAILABLE":
+                st.warning(f"לא ניתן לבנות ריפליי לשנת {hist_year}: {replay.get('message','UNAVAILABLE')}")
+            else:
+                hm = replay["metrics"]
+                cov = replay.get("coverage", {})
+                current_m = metrics
+                hc = st.columns(5)
+                hc[0].metric(f"עליות ללא סככה — ריפליי {hist_year}", f"{hm.get('unsheltered_boardings_replay',0):,.0f}", help="SIMULATED: ביקוש היסטורי על תשתית נוכחית")
+                hc[1].metric("מצב נוכחי", f"{current_m['unsheltered_boardings']:,.0f}")
+                delta_uns = current_m['unsheltered_boardings'] - hm.get('unsheltered_boardings_replay',0)
+                hc[2].metric("שינוי בעליות ללא סככה", f"{delta_uns:+,.0f}")
+                hc[3].metric(f"הזדמנויות — {hist_year}", int(hm.get('active_opportunities_replay',0)))
+                hc[4].metric("הזדמנויות נוכחיות", int(current_m['active_opportunities']))
+
+                st.caption(
+                    f"Resource ID: {replay.get('resource_id','')} · "
+                    f"שורות מקור שנמשכו: {replay.get('raw_row_count',0):,} · "
+                    f"תחנות נוכחיות עם התאמת ביקוש היסטורי: {cov.get('matched_current_stops',0):,}/{cov.get('current_stops',0):,}. "
+                    "Historical OnDay = CALCULATED from OBSERVED daily validations; replay = SIMULATED."
+                )
+
+                if hist_cmp is None or hist_cmp.empty:
+                    st.info("אין הזדמנויות להשוואה בעיר שנבחרה.")
+                else:
+                    counts_hist = hist_cmp["historical_status"].value_counts()
+                    cc = st.columns(5)
+                    cc[0].metric("חדשות", int(counts_hist.get("NEW_SINCE_HISTORICAL_REPLAY",0)))
+                    cc[1].metric("התחזקו", int(counts_hist.get("STRENGTHENED",0)))
+                    cc[2].metric("נחלשו", int(counts_hist.get("WEAKENED",0)))
+                    cc[3].metric("יצאו", int(counts_hist.get("NO_LONGER_CURRENT_OPPORTUNITY",0)))
+                    cc[4].metric("יציבות", int(counts_hist.get("PERSISTING_STABLE",0)))
+
+                    show_hist = hist_cmp.copy()
+                    show_hist["שינוי"] = show_hist["historical_status"].map(SYSTEM_HE).fillna(show_hist["historical_status"])
+                    show_hist["תחנת יעד"] = show_hist["recipient_name"]
+                    show_hist[f"Gain {hist_year}"] = pd.to_numeric(show_hist["historical_gain"], errors="coerce").round(1)
+                    show_hist["Gain נוכחי"] = pd.to_numeric(show_hist["current_gain"], errors="coerce").round(1)
+                    show_hist["Δ Gain"] = pd.to_numeric(show_hist["gain_delta"], errors="coerce").round(1)
+                    show_hist["סככה מוצעת אז"] = show_hist["historical_donor_name"]
+                    show_hist["סככה מוצעת כיום"] = show_hist["current_donor_name"]
+                    st.dataframe(
+                        show_hist[["שינוי","תחנת יעד",f"Gain {hist_year}","Gain נוכחי","Δ Gain","סככה מוצעת אז","סככה מוצעת כיום"]],
+                        use_container_width=True, hide_index=True,
+                    )
+
+                with st.expander("מתודולוגיה ו-Provenance — השוואה היסטורית"):
+                    st.markdown(
+                        "- `day_1..day_31` הם נתוני מקור נצפים.\n"
+                        "- לכל תחנה ותאריך מסכמים את כל חלונות הזמן הזמינים.\n"
+                        "- `Historical OnDay` הוא ממוצע ימי א׳–ה׳ ולכן **CALCULATED**.\n"
+                        "- סוג הסככה, העיר והקואורדינטות נלקחים מ-`Stations.xlsx` הנוכחי.\n"
+                        "- הרצת discovery/allocation עם ביקוש היסטורי על תשתית נוכחית היא **SIMULATED**.\n"
+                        "- המרחק נשאר מידע בלבד; one-to-one נשמר; thresholds לא שונו."
+                    )
+        except Exception as exc:
+            st.error(f"טעינת המאגר ההיסטורי נכשלה: {type(exc).__name__}: {exc}")
+
+    st.markdown("---")
+    st.markdown("## שינוי מאז Snapshot של TIOE")
     if result.changes is None or result.changes.empty:
         st.info("עדיין אין בסיס להשוואה. שמור Snapshot ראשון בלשונית היסטוריה, ולאחר עדכון מקור הנתונים שמור Snapshot נוסף.")
     else:
@@ -437,7 +528,7 @@ with tab_history:
             fig.update_layout(height=330, margin=dict(l=10,r=10,t=20,b=10))
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-    st.warning("ב-Community Cloud אחסון קבצים מקומי אינו מסד נתונים קבוע ועלול להימחק בעת redeploy/restart. ב-v0.8 זה עדיין מתאים ל-POC; לפני שימוש ארגוני נעביר את ה-registry וה-snapshots לאחסון מתמשך.")
+    st.warning("ב-Community Cloud אחסון קבצים מקומי אינו מסד נתונים קבוע ועלול להימחק בעת redeploy/restart. ב-v0.9 זה עדיין מתאים ל-POC; לפני שימוש ארגוני נעביר את ה-registry וה-snapshots לאחסון מתמשך.")
 
 with st.expander("מתודולוגיה ו-Provenance"):
     st.markdown("""

@@ -5,3 +5,4 @@ openpyxl>=3.1
 folium>=0.16
 plotly>=5.20
 pydeck>=0.9
+requests>=2.31

@@ -10,8 +10,14 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-PORTFOLIO_VERSION = "0.8"
+PORTFOLIO_VERSION = "0.9"
 
+
+from historical_engine import (
+    HISTORICAL_RESOURCES,
+    HistoricalDemandResult,
+    load_historical_station_demand,
+)
 from shelter_engine import (
     DiscoveryConfig,
     find_stations_file,
@@ -410,3 +416,208 @@ def map_points(result: PortfolioResult, city: str) -> pd.DataFrame:
         np.where(st["point_role"] == "DONOR", 75, 25),
     )
     return st
+
+
+# -----------------------------------------------------------------------------
+# v0.9 Historical Demand Replay
+# -----------------------------------------------------------------------------
+def _replay_stations_with_historical_demand(
+    result: PortfolioResult,
+    historical: HistoricalDemandResult,
+) -> tuple[pd.DataFrame, dict]:
+    """Apply historical station demand to the CURRENT infrastructure inventory.
+
+    This is deliberately a historical-demand replay, not a claim about historical
+    shelter inventory. Infrastructure type, coordinates and city are taken from
+    the current Stations.xlsx. Historical demand is joined using the audited
+    station_demand_id -> data.gov.il StationId mapping.
+    """
+    current = result.stations.copy()
+    if historical is None or historical.station_demand is None or historical.station_demand.empty:
+        return pd.DataFrame(), {
+            "status": "UNAVAILABLE",
+            "matched_current_stops": 0,
+            "current_stops": int(len(current)),
+            "historical_stations": 0,
+            "match_rate_current": np.nan,
+        }
+
+    hist = historical.station_demand.copy()
+    hist["StationId"] = hist["StationId"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+    hist["OnDay_historical"] = pd.to_numeric(hist["OnDay_historical"], errors="coerce")
+    hist = hist.dropna(subset=["OnDay_historical"]).drop_duplicates("StationId", keep="last")
+
+    current["station_demand_id"] = current["station_demand_id"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+    replay = current.merge(
+        hist[["StationId", "OnDay_historical", "observed_weekdays", "months_observed", "demand_provenance"]],
+        left_on="station_demand_id",
+        right_on="StationId",
+        how="left",
+    )
+    matched = replay["OnDay_historical"].notna()
+    replay = replay[matched].copy()
+    if replay.empty:
+        return replay, {
+            "status": "NO_MATCHES",
+            "matched_current_stops": 0,
+            "current_stops": int(len(current)),
+            "historical_stations": int(len(hist)),
+            "match_rate_current": 0.0 if len(current) else np.nan,
+        }
+
+    replay["OnDay_current_source"] = replay["OnDay"]
+    replay["OnDay"] = replay["OnDay_historical"]
+    replay["demand_provenance"] = (
+        "CALCULATED:OBSERVED_DATA_GOV_IL_STATION_VALIDATIONS->HISTORICAL_ONDAY"
+    )
+    replay["analysis_status"] = np.where(
+        replay["shed_structure"] == 2, "SHELTER_BASELINE", "POLE_UNASSESSED"
+    )
+    replay["demand_percentile_city"] = (
+        replay.groupby("city_name", group_keys=False)["OnDay"]
+        .rank(pct=True, method="average")
+    )
+
+    return replay.reset_index(drop=True), {
+        "status": "AVAILABLE",
+        "matched_current_stops": int(matched.sum()),
+        "current_stops": int(len(current)),
+        "historical_stations": int(len(hist)),
+        "match_rate_current": float(matched.mean()) if len(current) else np.nan,
+    }
+
+
+def historical_city_replay(
+    result: PortfolioResult,
+    city: str,
+    year: int,
+    historical: Optional[HistoricalDemandResult] = None,
+) -> dict:
+    """Re-run shelter discovery using historical demand + current infrastructure.
+
+    Provenance contract:
+      historical demand cells: OBSERVED at source;
+      Historical OnDay: CALCULATED;
+      replay opportunity/KPI: SIMULATED (historical demand on current inventory).
+    """
+    year = int(year)
+    hist = historical or load_historical_station_demand(year)
+    replay_base, coverage = _replay_stations_with_historical_demand(result, hist)
+    if replay_base.empty:
+        return {
+            "status": "UNAVAILABLE",
+            "year": year,
+            "resource_id": getattr(hist, "resource_id", ""),
+            "coverage": coverage,
+            "stations": pd.DataFrame(),
+            "allocations": pd.DataFrame(),
+            "metrics": {},
+            "provenance": "UNAVAILABLE",
+            "message": getattr(hist, "message", "Historical demand unavailable"),
+        }
+
+    cfg = DiscoveryConfig()
+    classified = classify_candidates(replay_base, cfg)
+    allocations = build_allocation_plan(classified, cfg)
+    city_st = classified[classified["city_name"].astype(str) == str(city)].copy()
+    city_al = allocations[allocations["city_name"].astype(str) == str(city)].copy() if not allocations.empty else pd.DataFrame()
+
+    known = city_st["shed_structure"].isin([1, 2])
+    demand = pd.to_numeric(city_st["OnDay"], errors="coerce")
+    uns = float(demand[(city_st["shed_structure"] == 1) & known].fillna(0).sum())
+    shel = float(demand[(city_st["shed_structure"] == 2) & known].fillna(0).sum())
+    total = uns + shel
+    gain = float(pd.to_numeric(city_al.get("relocation_gain", pd.Series(dtype=float)), errors="coerce").clip(lower=0).sum()) if not city_al.empty else 0.0
+
+    if not city_al.empty:
+        city_al = city_al.copy()
+        city_al["opportunity_id"] = [
+            _opportunity_id(str(r["city_name"]), str(r["recipient_station_key"]))
+            for _, r in city_al.iterrows()
+        ]
+        city_al["replay_provenance"] = "SIMULATED:HISTORICAL_DEMAND_ON_CURRENT_INFRASTRUCTURE"
+
+    return {
+        "status": "AVAILABLE",
+        "year": year,
+        "resource_id": hist.resource_id,
+        "coverage": coverage,
+        "stations": city_st,
+        "allocations": city_al,
+        "metrics": {
+            "matched_stops_city": int(len(city_st)),
+            "unsheltered_boardings_replay": uns,
+            "sheltered_boardings_replay": shel,
+            "unsheltered_share_replay": (uns / total) if total > 0 else np.nan,
+            "active_opportunities_replay": int(len(city_al)),
+            "net_reallocation_gain_replay": gain,
+        },
+        "provenance": "SIMULATED:HISTORICAL_DEMAND_ON_CURRENT_INFRASTRUCTURE",
+        "historical_demand_provenance": hist.provenance,
+        "raw_row_count": hist.raw_row_count,
+        "fetched_at_utc": hist.fetched_at_utc,
+        "message": "",
+    }
+
+
+def compare_historical_replay_to_current(
+    result: PortfolioResult,
+    city: str,
+    replay: dict,
+    stable_abs_gain: float = 25.0,
+    stable_rel_gain: float = 0.05,
+) -> pd.DataFrame:
+    """Compare a historical-demand replay to current one-to-one opportunities.
+
+    This classification is CALCULATED from two opportunity sets. It does not
+    infer causality and does not claim the historical infrastructure was equal to
+    today's inventory.
+    """
+    current = city_opportunities(result, city).copy()
+    hist = replay.get("allocations", pd.DataFrame()).copy() if replay else pd.DataFrame()
+
+    cur_by = {}
+    if not current.empty:
+        for _, r in current.iterrows():
+            cur_by[str(r["recipient_station_key"])] = r
+    hist_by = {}
+    if not hist.empty:
+        for _, r in hist.iterrows():
+            hist_by[str(r["recipient_station_key"])] = r
+
+    rows = []
+    all_keys = sorted(set(cur_by) | set(hist_by))
+    for key in all_keys:
+        c = cur_by.get(key)
+        h = hist_by.get(key)
+        if h is None and c is not None:
+            status = "NEW_SINCE_HISTORICAL_REPLAY"
+        elif c is None and h is not None:
+            status = "NO_LONGER_CURRENT_OPPORTUNITY"
+        else:
+            old_gain = float(pd.to_numeric(h.get("relocation_gain"), errors="coerce"))
+            new_gain = float(pd.to_numeric(c.get("relocation_gain"), errors="coerce"))
+            delta = new_gain - old_gain
+            denom = max(abs(old_gain), 1.0)
+            if abs(delta) <= max(float(stable_abs_gain), float(stable_rel_gain) * denom):
+                status = "PERSISTING_STABLE"
+            elif delta > 0:
+                status = "STRENGTHENED"
+            else:
+                status = "WEAKENED"
+
+        ref = c if c is not None else h
+        old_gain = pd.to_numeric(h.get("relocation_gain"), errors="coerce") if h is not None else np.nan
+        new_gain = pd.to_numeric(c.get("relocation_gain"), errors="coerce") if c is not None else np.nan
+        rows.append({
+            "recipient_station_key": key,
+            "recipient_name": str(ref.get("recipient_name", "")),
+            "historical_status": status,
+            "historical_gain": old_gain,
+            "current_gain": new_gain,
+            "gain_delta": (float(new_gain) - float(old_gain)) if pd.notna(old_gain) and pd.notna(new_gain) else np.nan,
+            "historical_donor_name": str(h.get("donor_name", "")) if h is not None else "",
+            "current_donor_name": str(c.get("donor_name", "")) if c is not None else "",
+            "comparison_provenance": "CALCULATED:HISTORICAL_REPLAY_VS_CURRENT",
+        })
+    return pd.DataFrame(rows)
