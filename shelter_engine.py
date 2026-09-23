@@ -17,7 +17,7 @@
 # - Adds lightweight snapshot history / change monitor for recurring portfolio review.
 # - Keeps Decision Tier = REVIEW because physical relocation feasibility is UNAVAILABLE.
 
-SHELTER_ENGINE_VERSION = "0.7.1"
+SHELTER_ENGINE_VERSION = "0.8"
 
 import os
 import re
@@ -39,7 +39,7 @@ except ImportError as exc:
     ) from exc
 
 
-VERSION = "0.6"
+VERSION = "0.8"
 
 # -----------------------------------------------------------------------------
 # Discovery configuration
@@ -163,8 +163,8 @@ def load_station_profiles(path: Optional[str] = None) -> pd.DataFrame:
       - valid Israel-area coordinates
 
     Provenance:
-      infrastructure_type: REPORTED from official station source
-      OnDay / Routes / DepDay: REPORTED source fields
+      infrastructure_type: OBSERVED from official station source
+      OnDay / Routes / DepDay: OBSERVED source fields
       city percentiles / priority score / gain / distance: CALCULATED
     """
     path = find_stations_file(path)
@@ -218,15 +218,15 @@ def load_station_profiles(path: Optional[str] = None) -> pd.DataFrame:
         "service_context_score",
     ] = np.nan
 
-    eligible["infra_provenance"] = "REPORTED:Stations.xlsx:shed_structure"
+    eligible["infra_provenance"] = "OBSERVED:Stations.xlsx:shed_structure"
     eligible["demand_provenance"] = np.where(
         eligible["OnDay"].notna(),
-        "REPORTED:Stations.xlsx:OnDay",
+        "OBSERVED:Stations.xlsx:OnDay",
         "UNAVAILABLE",
     )
     eligible["service_provenance"] = np.where(
         eligible[["Routes", "DepDay"]].notna().any(axis=1),
-        "REPORTED:Stations.xlsx:Routes/DepDay",
+        "OBSERVED:Stations.xlsx:Routes/DepDay",
         "UNAVAILABLE",
     )
 
@@ -685,7 +685,7 @@ def _popup_html(row: pd.Series) -> str:
       <span style='font-size:11px;color:#555'>
       מזהה ביקוש: {html.escape(str(row.get('station_demand_id','')))}<br>
       STOP_ID: {html.escape(str(row.get('stop_id','')))}<br>
-      מקור סוג התחנה: REPORTED — Stations.xlsx<br>
+      מקור סוג התחנה: OBSERVED — Stations.xlsx<br>
       מקור הביקוש: {html.escape(str(row.get('demand_provenance','')))}
       </span>
     </div>

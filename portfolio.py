@@ -10,7 +10,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-PORTFOLIO_VERSION = "0.7.1"
+PORTFOLIO_VERSION = "0.8"
 
 from shelter_engine import (
     DiscoveryConfig,
@@ -379,6 +379,17 @@ def city_opportunities(result: PortfolioResult, city: str) -> pd.DataFrame:
     al["user_status"] = user_statuses
     al["review_note"] = notes
     al["user_status_updated_at"] = updated
+
+    # v0.8 Opportunity Inspector semantics. These fields make the distinction
+    # between analytical evidence and field feasibility explicit without changing
+    # discovery, matching, ranking, or one-to-one allocation logic.
+    al["physical_feasibility"] = "UNAVAILABLE"
+    al["decision_tier"] = "REVIEW"
+    al["recipient_demand_provenance"] = "OBSERVED:Stations.xlsx:OnDay"
+    al["donor_demand_provenance"] = "OBSERVED:Stations.xlsx:OnDay"
+    al["gain_provenance"] = "CALCULATED:recipient_OnDay-donor_OnDay"
+    al["distance_provenance"] = "CALCULATED:coordinates;INFORMATION_ONLY"
+    al["allocation_provenance"] = "CALCULATED:one-to-one allocation"
     return al
 
 def map_points(result: PortfolioResult, city: str) -> pd.DataFrame:
