@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import glob
+import hashlib
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Optional
 
@@ -249,14 +251,133 @@ def city_history(result: PortfolioResult, city: str) -> pd.DataFrame:
     return out
 
 
+def _opportunity_id(city: str, recipient_station_key: str) -> str:
+    """Stable ID for the recipient-side infrastructure opportunity.
+
+    The donor may change between runs; the underlying opportunity is the same
+    unsheltered recipient asset, so the ID is intentionally recipient-based.
+    """
+    raw = f"{city}|{recipient_station_key}".encode("utf-8")
+    return "SH-" + hashlib.sha1(raw).hexdigest()[:10].upper()
+
+
+def _state_dir(result: PortfolioResult) -> str:
+    path = os.path.join(os.path.dirname(result.source_path), "TIOE_State")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _registry_path(result: PortfolioResult) -> str:
+    return os.path.join(_state_dir(result), "opportunity_registry.csv")
+
+
+def load_opportunity_registry(result: PortfolioResult) -> pd.DataFrame:
+    path = _registry_path(result)
+    cols = [
+        "opportunity_id", "city_name", "recipient_station_key",
+        "user_status", "review_note", "updated_at"
+    ]
+    if not os.path.exists(path):
+        return pd.DataFrame(columns=cols)
+    try:
+        df = pd.read_csv(path, dtype={"recipient_station_key": str})
+    except Exception:
+        return pd.DataFrame(columns=cols)
+    for col in cols:
+        if col not in df.columns:
+            df[col] = ""
+    return df[cols].copy()
+
+
+def save_opportunity_state(
+    result: PortfolioResult,
+    opportunity_id: str,
+    city_name: str,
+    recipient_station_key: str,
+    user_status: str,
+    review_note: str = "",
+) -> str:
+    """Persist one user workflow state in a lightweight CSV registry.
+
+    This is intentionally separate from system analytical status.
+    """
+    path = _registry_path(result)
+    reg = load_opportunity_registry(result)
+    now = datetime.now(timezone.utc).isoformat()
+    row = {
+        "opportunity_id": str(opportunity_id),
+        "city_name": str(city_name),
+        "recipient_station_key": str(recipient_station_key),
+        "user_status": str(user_status),
+        "review_note": str(review_note or ""),
+        "updated_at": now,
+    }
+    if not reg.empty and (reg["opportunity_id"].astype(str) == str(opportunity_id)).any():
+        idx = reg.index[reg["opportunity_id"].astype(str) == str(opportunity_id)][0]
+        for k, v in row.items():
+            reg.loc[idx, k] = v
+    else:
+        reg = pd.concat([reg, pd.DataFrame([row])], ignore_index=True)
+    reg.to_csv(path, index=False, encoding="utf-8-sig")
+    return path
+
+
+def save_current_snapshot(result: PortfolioResult) -> dict:
+    """Save a snapshot explicitly; unchanged source files are not duplicated."""
+    return prepare_snapshot_history(
+        result.source_path,
+        result.stations,
+        result.candidates,
+        result.allocations,
+        save_history=True,
+    )
+
+
 def city_opportunities(result: PortfolioResult, city: str) -> pd.DataFrame:
     al = result.allocations[result.allocations["city_name"] == city].copy()
     if al.empty:
         return al
     al = al.sort_values(["recipient_demand", "relocation_gain"], ascending=[False, False]).reset_index(drop=True)
     al["status_he"] = np.where(al["same_complex_guard"] == "REVIEW", "נדרשת בדיקה", "ללא דגל חריג")
-    return al
+    al["opportunity_id"] = [
+        _opportunity_id(str(r["city_name"]), str(r["recipient_station_key"]))
+        for _, r in al.iterrows()
+    ]
 
+    # System status comes from the analytical comparison and remains separate
+    # from the human workflow status.
+    al["system_status"] = "CURRENT"
+    al["gain_delta"] = np.nan
+    if result.changes is not None and not result.changes.empty:
+        ch = result.changes[result.changes["city_name"].astype(str) == str(city)].copy()
+        if not ch.empty:
+            ch["recipient_station_key"] = ch["recipient_station_key"].astype(str)
+            ch_by = ch.drop_duplicates("recipient_station_key", keep="last").set_index("recipient_station_key")
+            for idx, row in al.iterrows():
+                key = str(row["recipient_station_key"])
+                if key in ch_by.index:
+                    c = ch_by.loc[key]
+                    al.loc[idx, "system_status"] = str(c.get("change_status", "CURRENT"))
+                    al.loc[idx, "gain_delta"] = pd.to_numeric(c.get("gain_delta"), errors="coerce")
+
+    reg = load_opportunity_registry(result)
+    if not reg.empty:
+        reg = reg.drop_duplicates("opportunity_id", keep="last").set_index("opportunity_id")
+    user_statuses, notes, updated = [], [], []
+    for oid in al["opportunity_id"].astype(str):
+        if not reg.empty and oid in reg.index:
+            r = reg.loc[oid]
+            user_statuses.append(str(r.get("user_status") or "טרם נבדקה"))
+            notes.append(str(r.get("review_note") or ""))
+            updated.append(str(r.get("updated_at") or ""))
+        else:
+            user_statuses.append("טרם נבדקה")
+            notes.append("")
+            updated.append("")
+    al["user_status"] = user_statuses
+    al["review_note"] = notes
+    al["user_status_updated_at"] = updated
+    return al
 
 def map_points(result: PortfolioResult, city: str) -> pd.DataFrame:
     st = result.stations[result.stations["city_name"] == city].copy()

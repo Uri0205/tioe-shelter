@@ -14,7 +14,20 @@ from portfolio import (
     city_history,
     city_opportunities,
     map_points,
+    save_current_snapshot,
+    save_opportunity_state,
 )
+
+APP_VERSION = "0.7"
+USER_STATUSES = ["טרם נבדקה", "בבדיקה", "נדרשת בדיקת שטח", "אושרה", "יושמה", "לא רלוונטית"]
+SYSTEM_HE = {
+    "NEW": "חדשה",
+    "PERSISTING": "נמשכת",
+    "CURRENT": "נוכחית",
+    "RESOLVED_INFRASTRUCTURE_CHANGED": "שינוי תשתית זוהה",
+    "NO_LONGER_PRIORITY_CANDIDATE": "כבר לא בעדיפות",
+    "DROPPED_FROM_CURRENT_SET": "יצאה מהסט הנוכחי",
+}
 
 st.set_page_config(page_title="TIOE | תיק הסככות", page_icon="🚏", layout="wide", initial_sidebar_state="expanded")
 
@@ -24,31 +37,33 @@ html, body, [class*="css"] { direction: rtl; }
 [data-testid="stAppViewContainer"] { background: #f5f8fc; }
 [data-testid="stSidebar"] { background: #102d4d; }
 [data-testid="stSidebar"] * { color: white !important; }
-.block-container { padding-top: 1.2rem; padding-bottom: 2rem; max-width: 1600px; }
+.block-container { padding-top: 1.0rem; padding-bottom: 2rem; max-width: 1650px; }
 h1,h2,h3,h4,p,div,span,label { font-family: Arial, "Noto Sans Hebrew", sans-serif; }
 .tioe-title {font-size: 2.0rem; font-weight: 800; color:#102d4d; margin-bottom:2px;}
-.tioe-sub {color:#62758a; margin-bottom:18px;}
-.hero-card {background:white;border:1px solid #dce5ef;border-radius:16px;padding:18px 20px;min-height:150px;box-shadow:0 3px 12px rgba(16,45,77,.06)}
-.hero-kicker {font-size:.78rem;font-weight:800;color:#718096;letter-spacing:.03em;margin-bottom:8px}
+.tioe-sub {color:#62758a; margin-bottom:12px;}
+.hero-card {background:white;border:1px solid #dce5ef;border-radius:16px;padding:17px 19px;min-height:145px;box-shadow:0 3px 12px rgba(16,45,77,.06)}
+.hero-kicker {font-size:.78rem;font-weight:800;color:#718096;margin-bottom:8px}
 .hero-value {font-size:2.05rem;font-weight:850;color:#102d4d;line-height:1.05}
-.hero-label {font-size:1.02rem;font-weight:800;color:#263d56;margin-top:9px}
-.hero-note {font-size:.82rem;color:#7c8b99;margin-top:8px;line-height:1.4}
+.hero-label {font-size:1rem;font-weight:800;color:#263d56;margin-top:9px}
+.hero-note {font-size:.80rem;color:#7c8b99;margin-top:8px;line-height:1.4}
 .hero-red .hero-value {color:#e53935}.hero-blue .hero-value{color:#1769e0}.hero-green .hero-value{color:#14915f}
-.metric-card {background:white;border:1px solid #dde6f0;border-radius:14px;padding:14px 16px;min-height:115px;box-shadow:0 2px 9px rgba(16,45,77,.05)}
-.metric-value {font-size:1.65rem;font-weight:800;color:#102d4d;line-height:1.05}
-.metric-label {font-size:.95rem;font-weight:700;color:#263d56;margin-top:8px}
-.metric-note {font-size:.78rem;color:#7c8b99;margin-top:7px}
-.section-card {background:white;border:1px solid #dde6f0;border-radius:14px;padding:15px 17px;box-shadow:0 2px 9px rgba(16,45,77,.04)}
-.small-muted {font-size:.82rem;color:#718096}
-.badge {display:inline-block;padding:4px 9px;border-radius:999px;font-size:.78rem;font-weight:700;background:#e8f1ff;color:#1769e0}
+.metric-card {background:white;border:1px solid #dde6f0;border-radius:14px;padding:13px 15px;min-height:108px;box-shadow:0 2px 9px rgba(16,45,77,.05)}
+.metric-value {font-size:1.58rem;font-weight:800;color:#102d4d;line-height:1.05}
+.metric-label {font-size:.93rem;font-weight:700;color:#263d56;margin-top:8px}
+.metric-note {font-size:.76rem;color:#7c8b99;margin-top:7px}
 .coverage-note {background:#fff8e8;border:1px solid #f0d69a;border-radius:12px;padding:10px 12px;font-size:.83rem;color:#6f5718}
+.case-card {background:white;border:1px solid #dce5ef;border-radius:14px;padding:16px 18px;box-shadow:0 2px 9px rgba(16,45,77,.05)}
+.case-title {font-size:1.13rem;font-weight:800;color:#102d4d}
+.case-big {font-size:1.75rem;font-weight:850;color:#14915f}
+.note {font-size:.80rem;color:#718096}
 </style>
 """, unsafe_allow_html=True)
 
 
 @st.cache_data(show_spinner=False)
-def load_data(path: str | None, save_history: bool):
-    return run_portfolio(path, save_history=save_history)
+def load_data(path: str):
+    # v0.7: analytical load does not silently create history. Snapshot saving is explicit.
+    return run_portfolio(path, save_history=False)
 
 
 with st.sidebar:
@@ -56,29 +71,27 @@ with st.sidebar:
     st.caption("Transit Infrastructure Optimization Engine")
     st.markdown("---")
     st.markdown("### תיק הסככות")
-    st.markdown("תמונת מצב")
+    st.markdown("**תמונת מצב**")
     st.markdown("הזדמנויות")
     st.markdown("מה השתנה?")
-    st.markdown("מפה")
     st.markdown("היסטוריה")
     st.markdown("---")
     st.caption("Optimize existing infrastructure before adding infrastructure.")
 
-
 path_candidates = [
     os.environ.get("TIOE_STATIONS_PATH"),
     os.path.join(os.path.dirname(__file__), "data", "Stations.xlsx"),
+    os.path.join(os.path.dirname(__file__), "Stations.xlsx"),  # backward-compatible with user's current repo
     "/content/drive/MyDrive/TIOE_Data/Stations.xlsx",
     "/content/drive/MyDrive/TIOE DATA/Stations.xlsx",
-    "/mnt/data/stations_inspect/Stations.xlsx",
 ]
 source_path = next((p for p in path_candidates if p and os.path.exists(p)), None)
 if source_path is None:
-    st.error("לא נמצא Stations.xlsx. שים את הקובץ בתיקיית data ליד האפליקציה, או הגדר TIOE_STATIONS_PATH.")
+    st.error("לא נמצא Stations.xlsx. שים אותו בתיקיית data או בשורש האפליקציה.")
     st.stop()
 
 with st.spinner("טוען נתוני תשתית ומחשב את תיק הסככות..."):
-    result = load_data(source_path, save_history=True)
+    result = load_data(source_path)
 
 cities = result.stations.groupby("city_name").size().sort_values(ascending=False).index.tolist()
 default_idx = cities.index("באר שבע") if "באר שבע" in cities else 0
@@ -97,170 +110,203 @@ points = map_points(result, city)
 coverage = metrics["coverage"]
 impact = metrics["impact"]
 
-# -----------------------------------------------------------------------------
-# Three core product metrics
-# -----------------------------------------------------------------------------
-hero_cols = st.columns(3)
-hero_data = [
-    (
-        "hero-red",
-        "מצב נוכחי",
-        f"{metrics['unsheltered_boardings']:,.0f}",
-        "עליות ביום בתחנות ללא סככה",
-        "CALCULATED · סכום OnDay בתחנות עמוד פעילות ורגילות",
-    ),
-    (
-        "hero-blue",
-        "פוטנציאל אופטימיזציה",
-        f"+{metrics['net_reallocation_gain']:,.0f}",
-        "תוספת כיסוי נטו מהקצאה מחדש",
-        "CALCULATED · סט one-to-one בלבד · בכפוף לבדיקת היתכנות פיזית",
-    ),
-    (
-        "hero-green",
-        "השפעה שמומשה",
-        "—" if not impact.get("available") else f"{impact['infra_coverage_gain']:+,.0f}",
-        "שינוי כיסוי המזוהה עם שינויי תשתית",
-        "UNAVAILABLE עד שיש לפחות שני snapshots" if not impact.get("available") else "CALCULATED מהשוואת סיווג תשתית בין snapshots · לא טענה סיבתית",
-    ),
-]
-for col, (cls, kicker, val, label, note) in zip(hero_cols, hero_data):
-    col.markdown(
-        f'<div class="hero-card {cls}"><div class="hero-kicker">{kicker}</div><div class="hero-value">{val}</div><div class="hero-label">{label}</div><div class="hero-note">{note}</div></div>',
-        unsafe_allow_html=True,
-    )
+tab_overview, tab_opps, tab_changes, tab_history = st.tabs(["תמונת מצב", "הזדמנויות", "מה השתנה?", "היסטוריה"])
 
-st.write("")
+with tab_overview:
+    hero_cols = st.columns(3)
+    hero_data = [
+        ("hero-red", "מצב נוכחי", f"{metrics['unsheltered_boardings']:,.0f}", "עליות ביום בתחנות ללא סככה", "CALCULATED · סכום OnDay בתחנות עמוד פעילות ורגילות"),
+        ("hero-blue", "פוטנציאל אופטימיזציה", f"+{metrics['net_reallocation_gain']:,.0f}", "תוספת כיסוי נטו מהקצאה מחדש", "CALCULATED · one-to-one · בכפוף לבדיקת היתכנות פיזית"),
+        ("hero-green", "השפעה שמומשה", "—" if not impact.get("available") else f"{impact['infra_coverage_gain']:+,.0f}", "שינוי כיסוי המזוהה עם שינויי תשתית", "UNAVAILABLE עד שיש לפחות שני snapshots" if not impact.get("available") else "CALCULATED מהשוואת סיווג תשתית בין snapshots"),
+    ]
+    for col, (cls, kicker, val, label, note) in zip(hero_cols, hero_data):
+        col.markdown(f'<div class="hero-card {cls}"><div class="hero-kicker">{kicker}</div><div class="hero-value">{val}</div><div class="hero-label">{label}</div><div class="hero-note">{note}</div></div>', unsafe_allow_html=True)
 
-# Supporting portfolio metrics
-cols = st.columns(5)
-support = [
-    (f"{metrics['shelters']:,}", "סככות קיימות", "REPORTED"),
-    (f"{metrics['poles']:,}", "תחנות עמוד", "REPORTED"),
-    (f"{metrics['active_opportunities']:,}", "הזדמנויות פעילות", "one-to-one · REVIEW"),
-    (f"{100*metrics['unsheltered_share']:.1f}%" if pd.notna(metrics['unsheltered_share']) else "—", "שיעור העליות ללא סככה", "מתוך עליות בתחנות שסוג התשתית שלהן ידוע"),
-    (f"{100*coverage['infra_coverage']:.1f}%" if pd.notna(coverage['infra_coverage']) else "—", "כיסוי מידע על סוג התחנה", f"{coverage['infra_known_stops']:.0f}/{coverage['active_regular_stops']:.0f} תחנות פעילות רגילות" if pd.notna(coverage['active_regular_stops']) else "UNAVAILABLE"),
-]
-for col, (val, label, note) in zip(cols, support):
-    col.markdown(f'<div class="metric-card"><div class="metric-value">{val}</div><div class="metric-label">{label}</div><div class="metric-note">{note}</div></div>', unsafe_allow_html=True)
+    st.write("")
+    cols = st.columns(5)
+    support = [
+        (f"{metrics['shelters']:,}", "סככות קיימות", "REPORTED"),
+        (f"{metrics['poles']:,}", "תחנות עמוד", "REPORTED"),
+        (f"{metrics['active_opportunities']:,}", "הזדמנויות פעילות", "one-to-one · REVIEW"),
+        (f"{100*metrics['unsheltered_share']:.1f}%" if pd.notna(metrics['unsheltered_share']) else "—", "שיעור העליות ללא סככה", "מתוך עליות בתחנות שסוג התשתית שלהן ידוע"),
+        (f"{100*coverage['infra_coverage']:.1f}%" if pd.notna(coverage['infra_coverage']) else "—", "כיסוי מידע על סוג התחנה", f"{coverage['infra_known_stops']:.0f}/{coverage['active_regular_stops']:.0f} תחנות" if pd.notna(coverage['active_regular_stops']) else "UNAVAILABLE"),
+    ]
+    for col, (val, label, note) in zip(cols, support):
+        col.markdown(f'<div class="metric-card"><div class="metric-value">{val}</div><div class="metric-label">{label}</div><div class="metric-note">{note}</div></div>', unsafe_allow_html=True)
 
-if pd.notna(coverage.get("infra_unknown_stops")) and coverage["infra_unknown_stops"] > 0:
-    st.markdown(
-        f'<div class="coverage-note">⚠️ {int(coverage["infra_unknown_stops"]):,} תחנות פעילות רגילות בעיר אינן מסווגות כעמוד/סככה במקור. הן אינן נספרות כ"ללא סככה".</div>',
-        unsafe_allow_html=True,
-    )
+    if pd.notna(coverage.get("infra_unknown_stops")) and coverage["infra_unknown_stops"] > 0:
+        st.markdown(f'<div class="coverage-note">⚠️ {int(coverage["infra_unknown_stops"]):,} תחנות פעילות רגילות בעיר אינן מסווגות כעמוד/סככה במקור. הן אינן נספרות כ״ללא סככה״.</div>', unsafe_allow_html=True)
 
-st.write("")
+    st.write("")
+    c1, c2, c3 = st.columns([1.05, .78, 1.55])
+    with c1:
+        st.markdown("#### מגמת עליות בתחנות ללא סככה")
+        if len(hist) >= 2:
+            h = hist.copy()
+            h["תאריך הרצה"] = h["snapshot_time"].dt.strftime("%d.%m.%Y")
+            fig = px.line(h, x="תאריך הרצה", y="unsheltered_boardings", markers=True, labels={"unsheltered_boardings":"עליות/יום"})
+            fig.update_layout(margin=dict(l=10,r=10,t=10,b=10), height=305, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        else:
+            st.info("אין עדיין שני snapshots. שמור baseline דרך לשונית היסטוריה; לאחר מקור נתונים חדש תופיע כאן מגמה.")
+            fig = go.Figure(go.Indicator(mode="number", value=metrics["unsheltered_boardings"], number={"valueformat":",.0f"}, title={"text":"מצב נוכחי — עליות/יום ללא סככה"}))
+            fig.update_layout(height=235, margin=dict(l=10,r=10,t=20,b=10))
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-# -----------------------------------------------------------------------------
-# Trend + coverage + map
-# -----------------------------------------------------------------------------
-c1, c2, c3 = st.columns([1.15, .85, 1.55])
-with c1:
-    st.markdown("#### מגמת עליות בתחנות ללא סככה")
-    if len(hist) >= 2:
-        h = hist.copy()
-        h["תאריך הרצה"] = h["snapshot_time"].dt.strftime("%d.%m.%Y")
-        fig = px.line(h, x="תאריך הרצה", y="unsheltered_boardings", markers=True, labels={"unsheltered_boardings":"עליות/יום"})
-        fig.update_layout(margin=dict(l=10,r=10,t=10,b=10), height=310, showlegend=False)
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    with c2:
+        st.markdown("#### התפלגות עליות לפי סוג תחנה")
+        pie = go.Figure(data=[go.Pie(labels=["תחנות עם סככה", "תחנות עמוד"], values=[metrics["sheltered_boardings"], metrics["unsheltered_boardings"]], hole=.62, textinfo="percent")])
+        pie.update_layout(height=305, margin=dict(l=5,r=5,t=10,b=5), legend=dict(orientation="h", y=-.1))
+        st.plotly_chart(pie, use_container_width=True, config={"displayModeBar": False})
+
+    with c3:
+        st.markdown(f"#### מפת מצב תשתיתי — {city}")
+        if not points.empty:
+            center_lat, center_lon = float(points["lat"].median()), float(points["lon"].median())
+            color_map = {"DONOR": [23,105,224,220], "RECIPIENT": [239,68,68,225], "OTHER": [111,130,145,75]}
+            map_df = points[["lat","lon","station_name","OnDay","infrastructure_type","point_role","radius"]].copy()
+            map_df["color"] = map_df["point_role"].map(color_map)
+            map_df["demand_label"] = pd.to_numeric(map_df["OnDay"], errors="coerce").map(lambda x: "אין נתון" if pd.isna(x) else f"{x:,.1f}")
+            map_df["role_he"] = map_df["point_role"].map({"DONOR":"סככה מוצעת להעברה", "RECIPIENT":"תחנת עמוד יעד", "OTHER":"תחנה אחרת"})
+            layer = pdk.Layer("ScatterplotLayer", data=map_df, get_position="[lon, lat]", get_fill_color="color", get_radius="radius", radius_min_pixels=2, radius_max_pixels=15, pickable=True, stroked=True, get_line_color=[255,255,255,180], line_width_min_pixels=1)
+            deck = pdk.Deck(map_style="light", initial_view_state=pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=11.5, pitch=0), layers=[layer], tooltip={"html":"<b>{station_name}</b><br>{role_he}<br>עליות/יום: {demand_label}"})
+            st.pydeck_chart(deck, use_container_width=True)
+            st.caption("כחול = סככה מוצעת להעברה · אדום = תחנת עמוד יעד · אין קווי התאמה; המרחק אינו חלק מההמלצה.")
+
+    st.markdown("### הזדמנויות מרכזיות")
+    if opps.empty:
+        st.info("לא נמצאו הזדמנויות one-to-one בעיר לפי פרופיל ה-Discovery הנוכחי.")
     else:
-        st.info("נשמר Snapshot ראשון. לאחר עדכון נתונים נוסף תוצג כאן מגמה היסטורית.")
-        fig = go.Figure(go.Indicator(mode="number", value=metrics["unsheltered_boardings"], number={"valueformat":",.0f"}, title={"text":"מצב נוכחי — עליות/יום ללא סככה"}))
-        fig.update_layout(height=245, margin=dict(l=10,r=10,t=20,b=10))
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        display = opps.head(8).copy()
+        display["סטטוס מערכת"] = display["system_status"].map(SYSTEM_HE).fillna(display["system_status"])
+        display["סטטוס טיפול"] = display["user_status"]
+        display["תחנת עמוד יעד"] = display["recipient_name"]
+        display["סככה מוצעת להעברה"] = display["donor_name"]
+        display["עליות יעד"] = display["recipient_demand"].round(1)
+        display["עליות מקור"] = display["donor_demand"].round(1)
+        display["תוספת כיסוי נטו"] = display["relocation_gain"].round(1)
+        st.dataframe(display[["opportunity_id","סטטוס מערכת","סטטוס טיפול","תחנת עמוד יעד","סככה מוצעת להעברה","עליות יעד","עליות מקור","תוספת כיסוי נטו"]], use_container_width=True, hide_index=True)
 
-with c2:
-    st.markdown("#### התפלגות עליות לפי סוג תחנה")
-    pie = go.Figure(data=[go.Pie(
-        labels=["תחנות עם סככה", "תחנות עמוד"],
-        values=[metrics["sheltered_boardings"], metrics["unsheltered_boardings"]],
-        hole=.62,
-        textinfo="percent",
-    )])
-    pie.update_layout(height=310, margin=dict(l=5,r=5,t=10,b=5), legend=dict(orientation="h", y=-.1))
-    st.plotly_chart(pie, use_container_width=True, config={"displayModeBar": False})
+with tab_opps:
+    st.markdown("## Pipeline הזדמנויות")
+    st.caption("סטטוס המערכת נוצר מהנתונים; סטטוס הטיפול נקבע על-ידי המשתמש. הם נשמרים בנפרד.")
+    if opps.empty:
+        st.info("אין הזדמנויות פעילות בעיר.")
+    else:
+        filter_status = st.multiselect("סינון לפי סטטוס טיפול", USER_STATUSES, default=USER_STATUSES)
+        filtered = opps[opps["user_status"].isin(filter_status)].copy()
+        if filtered.empty:
+            st.info("אין הזדמנויות המתאימות לסינון.")
+        else:
+            labels = {str(r["opportunity_id"]): f"{r['recipient_name']} · +{r['relocation_gain']:.1f} עליות/יום" for _, r in filtered.iterrows()}
+            selected_id = st.selectbox("בחר הזדמנות", list(labels.keys()), format_func=lambda x: labels[x])
+            row = filtered[filtered["opportunity_id"] == selected_id].iloc[0]
+            a,b,c = st.columns([1.2,1.2,.8])
+            with a:
+                st.markdown(f'<div class="case-card"><div class="case-title">תחנת עמוד יעד</div><h3>{row["recipient_name"]}</h3><b>{row["recipient_demand"]:,.1f}</b> עליות/יום<br>קווים: {"—" if pd.isna(row.get("recipient_routes")) else int(row["recipient_routes"])}<br>נסיעות/עצירות: {"—" if pd.isna(row.get("recipient_departures")) else int(row["recipient_departures"])}</div>', unsafe_allow_html=True)
+            with b:
+                st.markdown(f'<div class="case-card"><div class="case-title">סככה מוצעת להעברה</div><h3>{row["donor_name"]}</h3><b>{row["donor_demand"]:,.1f}</b> עליות/יום<br><span class="note">המרחק: {row["distance_m"]:,.0f} מ׳ — מידע בלבד</span></div>', unsafe_allow_html=True)
+            with c:
+                st.markdown(f'<div class="case-card"><div class="case-title">תוספת כיסוי נטו</div><div class="case-big">+{row["relocation_gain"]:,.1f}</div><span class="note">CALCULATED · REVIEW</span></div>', unsafe_allow_html=True)
 
-with c3:
-    st.markdown(f"#### מפת מצב תשתיתי — {city}")
-    if not points.empty:
-        center_lat = float(points["lat"].median())
-        center_lon = float(points["lon"].median())
-        color_map = {"DONOR": [23,105,224,220], "RECIPIENT": [239,68,68,225], "OTHER": [111,130,145,85]}
-        map_df = points[["lat","lon","station_name","OnDay","infrastructure_type","point_role","radius"]].copy()
-        map_df["color"] = map_df["point_role"].map(color_map)
-        map_df["demand_label"] = pd.to_numeric(map_df["OnDay"], errors="coerce").map(lambda x: "אין נתון" if pd.isna(x) else f"{x:,.1f}")
-        map_df["role_he"] = map_df["point_role"].map({"DONOR":"סככה מוצעת להעברה", "RECIPIENT":"תחנת עמוד יעד", "OTHER":"תחנה אחרת"})
-        layer = pdk.Layer(
-            "ScatterplotLayer",
-            data=map_df,
-            get_position="[lon, lat]",
-            get_fill_color="color",
-            get_radius="radius",
-            radius_min_pixels=2,
-            radius_max_pixels=15,
-            pickable=True,
-            stroked=True,
-            get_line_color=[255,255,255,180],
-            line_width_min_pixels=1,
-        )
-        deck = pdk.Deck(
-            map_style="light",
-            initial_view_state=pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=11.7, pitch=0),
-            layers=[layer],
-            tooltip={"html":"<b>{station_name}</b><br>{role_he}<br>עליות/יום: {demand_label}"},
-        )
-        st.pydeck_chart(deck, use_container_width=True, height=360)
-        st.caption("כחול = סככה מוצעת להעברה · אדום = תחנת עמוד יעד · אפור = תחנה אחרת. אין קווי התאמה: המרחק אינו חלק מההמלצה.")
+            status_col, note_col = st.columns([1,2])
+            with status_col:
+                current_status = row.get("user_status", "טרם נבדקה")
+                idx = USER_STATUSES.index(current_status) if current_status in USER_STATUSES else 0
+                new_status = st.selectbox("סטטוס טיפול", USER_STATUSES, index=idx, key=f"status_{selected_id}")
+            with note_col:
+                new_note = st.text_input("הערת בדיקה", value=str(row.get("review_note", "")), key=f"note_{selected_id}")
+            if st.button("שמור סטטוס", type="primary", key=f"save_{selected_id}"):
+                save_opportunity_state(result, selected_id, city, str(row["recipient_station_key"]), new_status, new_note)
+                st.success("סטטוס ההזדמנות נשמר.")
+                st.cache_data.clear()
+                st.rerun()
 
-# -----------------------------------------------------------------------------
-# Realized impact / change attribution
-# -----------------------------------------------------------------------------
-st.markdown("#### מה השתנה מאז העדכון הקודם?")
-if impact.get("available"):
-    a1, a2, a3, a4 = st.columns(4)
-    a1.metric("שינוי כולל בעליות ללא סככה", f"{impact['total_improvement']:+,.0f}", help="חיובי = ירידה בעליות בתחנות ללא סככה")
-    a2.metric("שינוי כיסוי המזוהה עם תשתית", f"{impact['infra_coverage_gain']:+,.0f}", help="מחושב מתחנות שעברו עמוד↔סככה, לפי OnDay הנוכחי")
-    a3.metric("יתר השינוי", f"{impact['residual_change']:+,.0f}", help="עשוי לנבוע מביקוש, שירות, תחנות חדשות/שהוסרו או שינויי מאגר; לא מופרד בשלב זה")
-    a4.metric("עמוד → סככה", int(impact["pole_to_shelter_count"]), delta=f"סככה → עמוד: {int(impact['shelter_to_pole_count'])}", delta_color="off")
-else:
-    st.info("אין עדיין שני snapshots להשוואה. לאחר מקור נתונים חדש המערכת תפריד בין שינויי תשתית לבין יתר השינוי, בלי לייחס סיבתיות שאין לנו נתונים להוכיח.")
+            st.markdown("#### כל ההזדמנויות בעיר")
+            table = opps.copy()
+            table["מערכת"] = table["system_status"].map(SYSTEM_HE).fillna(table["system_status"])
+            table["טיפול"] = table["user_status"]
+            table["יעד"] = table["recipient_name"]
+            table["סככה מוצעת"] = table["donor_name"]
+            table["תוספת נטו"] = table["relocation_gain"].round(1)
+            table["בדיקה"] = table["status_he"]
+            st.dataframe(table[["opportunity_id","מערכת","טיפול","יעד","סככה מוצעת","תוספת נטו","בדיקה"]], use_container_width=True, hide_index=True)
 
-chg_cols = st.columns(4)
-chg = [
-    ("הזדמנויות חדשות", metrics["new_opportunities"]),
-    ("הזדמנויות נמשכות", metrics["persisting_opportunities"]),
-    ("שינוי תשתית שזוהה", metrics["resolved_infrastructure"]),
-    ("כבר לא בסט הנוכחי", metrics["dropped_or_changed"]),
-]
-for col, (label, val) in zip(chg_cols, chg):
-    col.metric(label, val)
+with tab_changes:
+    st.markdown("## מה השתנה מאז ה-Snapshot הקודם?")
+    if result.changes is None or result.changes.empty:
+        st.info("עדיין אין בסיס להשוואה. שמור Snapshot ראשון בלשונית היסטוריה, ולאחר עדכון מקור הנתונים שמור Snapshot נוסף.")
+    else:
+        ch = result.changes[result.changes["city_name"].astype(str) == str(city)].copy()
+        if ch.empty:
+            st.info("לא זוהו שינויי הזדמנויות בעיר בהשוואה הזמינה.")
+        else:
+            counts = ch["change_status"].value_counts()
+            cs = st.columns(4)
+            vals = [
+                (int(counts.get("NEW",0)), "הזדמנויות חדשות"),
+                (int(counts.get("PERSISTING",0)), "הזדמנויות נמשכות"),
+                (int(counts.get("RESOLVED_INFRASTRUCTURE_CHANGED",0)), "שינוי תשתית זוהה"),
+                (int(counts.get("NO_LONGER_PRIORITY_CANDIDATE",0)+counts.get("DROPPED_FROM_CURRENT_SET",0)), "יצאו מהסט הנוכחי"),
+            ]
+            for col,(v,lbl) in zip(cs,vals):
+                col.metric(lbl,v)
+            show = ch.copy()
+            show["סטטוס"] = show["change_status"].map(SYSTEM_HE).fillna(show["change_status"])
+            show["תחנת יעד"] = show["recipient_name"]
+            show["Gain קודם"] = pd.to_numeric(show["previous_gain"], errors="coerce").round(1)
+            show["Gain נוכחי"] = pd.to_numeric(show["current_gain"], errors="coerce").round(1)
+            show["שינוי Gain"] = pd.to_numeric(show["gain_delta"], errors="coerce").round(1)
+            st.dataframe(show[["סטטוס","תחנת יעד","previous_donor_name","current_donor_name","Gain קודם","Gain נוכחי","שינוי Gain"]], use_container_width=True, hide_index=True)
 
-# -----------------------------------------------------------------------------
-# Opportunities
-# -----------------------------------------------------------------------------
-st.markdown("#### הזדמנויות עיקריות")
-if opps.empty:
-    st.info("לא נמצאו כרגע הזדמנויות one-to-one לפי פרופיל ה-Discovery הנוכחי. אין בכך קביעה שאין צורך בסככות.")
-else:
-    table = opps[["recipient_name","recipient_demand","donor_name","donor_demand","relocation_gain","status_he"]].copy()
-    table.columns = ["תחנת עמוד יעד", "עליות/יום ביעד", "סככה מוצעת להעברה", "עליות/יום בתחנת המקור", "תוספת כיסוי נטו", "סטטוס"]
-    table["תוספת כיסוי נטו"] = table["תוספת כיסוי נטו"].map(lambda x: f"+{x:,.1f}")
-    table["עליות/יום ביעד"] = table["עליות/יום ביעד"].map(lambda x: f"{x:,.1f}")
-    table["עליות/יום בתחנת המקור"] = table["עליות/יום בתחנת המקור"].map(lambda x: f"{x:,.1f}")
-    st.dataframe(table, use_container_width=True, hide_index=True, height=min(460, 42 + 36*len(table)))
+        if impact.get("available"):
+            st.markdown("### פירוק השינוי בכיסוי")
+            cols = st.columns(3)
+            cols[0].metric("שינוי כולל בעליות בתחנות ללא סככה", f"{impact['total_improvement']:+,.0f}")
+            cols[1].metric("שינוי כיסוי המזוהה עם שינוי תשתית", f"{impact['infra_coverage_gain']:+,.0f}")
+            cols[2].metric("יתר שינוי — ללא ייחוס סיבתי", f"{impact['residual_change']:+,.0f}")
 
-with st.expander("פרובננס, כיסוי נתונים והגדרות"):
-    st.markdown(f"""
-- **סוג תשתית (סככה/עמוד):** `REPORTED` מתוך `Stations.xlsx → shed_structure`.
-- **OnDay:** `REPORTED` מתוך `Stations.xlsx`; לפי מטא-דאטה המקור הוא ממוצע תיקופים/עליות ביום חול.
-- **עליות ביום בתחנות ללא סככה:** `CALCULATED` — סכום `OnDay` בתחנות עמוד פעילות ורגילות בלבד.
-- **תחנה ללא מידע על סוג תשתית אינה מסווגת כתחנה ללא סככה.** כיסוי סיווג התשתית בעיר: **{100*coverage['infra_coverage']:.1f}%** אם הנתון זמין.
-- **שיעור העליות ללא סככה:** מחושב רק מתוך תחנות שסוג התשתית שלהן ידוע וביקושן זמין.
-- **תוספת כיסוי נטו מהקצאה מחדש:** `CALCULATED` — `recipient OnDay - donor OnDay`, על סט one-to-one בלבד.
-- **השפעה שמומשה:** `CALCULATED` רק כאשר קיימים לפחות שני snapshots. שינוי תשתית מזוהה מסיווג עמוד↔סככה; יתר השינוי אינו מיוחס אוטומטית לביקוש או לשירות.
-- **ישימות פיזית להעברה:** `UNAVAILABLE` בשלב זה, ולכן ההזדמנויות נשארות בדרגת `REVIEW`.
-- **מרחק:** מידע תיאורי בלבד ואינו מסנן או מדרג התאמות.
+with tab_history:
+    st.markdown("## היסטוריה ו-Snapshots")
+    st.write("Snapshot שומר את תמונת התשתית וההזדמנויות של מקור הנתונים הנוכחי. אותו קובץ מקור לא נשמר פעמיים.")
+    if st.button("שמור Snapshot / Baseline נוכחי", type="primary"):
+        saved = save_current_snapshot(result)
+        status = saved.get("status", "")
+        if status == "SNAPSHOT_SAVED":
+            st.success("Snapshot נשמר בהצלחה.")
+        elif status == "UNCHANGED_SOURCE_NOT_RESAVED":
+            st.info("המקור לא השתנה מאז ה-Snapshot האחרון, ולכן לא נוצר עותק כפול.")
+        else:
+            st.info(f"סטטוס: {status}")
+        st.cache_data.clear()
+        st.rerun()
+
+    hist2 = city_history(result, city)
+    if hist2.empty:
+        st.info("אין עדיין snapshots שמורים לעיר.")
+    else:
+        h = hist2.copy()
+        h["תאריך"] = h["snapshot_time"].dt.strftime("%d.%m.%Y %H:%M")
+        h["עליות ללא סככה"] = h["unsheltered_boardings"].round(1)
+        h["סככות"] = h["shelters"]
+        h["עמודים"] = h["poles"]
+        st.dataframe(h[["תאריך","עליות ללא סככה","סככות","עמודים"]], use_container_width=True, hide_index=True)
+        if len(h) >= 2:
+            fig = px.line(h, x="תאריך", y="עליות ללא סככה", markers=True)
+            fig.update_layout(height=330, margin=dict(l=10,r=10,t=20,b=10))
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    st.warning("ב-Community Cloud אחסון קבצים מקומי אינו מסד נתונים קבוע ועלול להימחק בעת redeploy/restart. ב-v0.7 זה מתאים ל-POC; לפני שימוש ארגוני נעביר את ה-registry וה-snapshots לאחסון מתמשך.")
+
+with st.expander("מתודולוגיה ו-Provenance"):
+    st.markdown("""
+- **סוג התחנה:** `REPORTED` מתוך `Stations.xlsx:shed_structure`.
+- **OnDay:** נתון מקור מדווח; התצוגה מתייחסת אליו כעליות/תיקופים ממוצעים ביום חול בהתאם להגדרת המקור.
+- **עליות בתחנות ללא סככה:** `CALCULATED` ורק בתחנות שמסווגות כעמוד. תחנות שסוגן אינו ידוע אינן נספרות כעמוד.
+- **תוספת כיסוי נטו:** `CALCULATED` = OnDay ביעד פחות OnDay במקור, על סט one-to-one בלבד.
+- **ישימות פיזית:** `UNAVAILABLE`; לכן ההזדמנות נשארת `REVIEW` עד בדיקה.
+- **מרחק:** מידע בלבד; אינו מסנן ואינו מדרג.
+- **סטטוס מערכת:** מחושב מהשוואת snapshots. **סטטוס טיפול:** קלט משתמש נפרד.
 """)
 
-st.caption("TIOE Shelter Infrastructure Portfolio v0.6 · Current State / Optimization Potential / Realized Impact")
+st.caption(f"TIOE Shelter Infrastructure Portfolio v{APP_VERSION} · Opportunity Pipeline + Snapshot Baseline")
