@@ -42,7 +42,7 @@ map_points = portfolio_module.map_points
 save_current_snapshot = portfolio_module.save_current_snapshot
 save_opportunity_state = portfolio_module.save_opportunity_state
 
-APP_VERSION = "0.8"
+APP_VERSION = "0.8.1"
 USER_STATUSES = ["טרם נבדקה", "בבדיקה", "נדרשת בדיקת שטח", "אושרה", "יושמה", "לא רלוונטית"]
 SYSTEM_HE = {
     "NEW": "חדשה",
@@ -57,35 +57,53 @@ st.set_page_config(page_title="TIOE | תיק הסככות", page_icon="🚏", la
 
 st.markdown("""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap');
+:root { --tioe-font: "Heebo", "Noto Sans Hebrew", Arial, sans-serif; }
 html, body, [class*="css"] { direction: rtl; }
+html { font-size: 18px; }
+body, .stApp, .stApp * { font-family: var(--tioe-font) !important; }
 [data-testid="stAppViewContainer"] { background: #f5f8fc; }
 [data-testid="stSidebar"] { background: #102d4d; }
 [data-testid="stSidebar"] * { color: white !important; }
-.block-container { padding-top: 1.8rem; padding-bottom: 2rem; max-width: 1650px; }
-h1,h2,h3,h4,p,div,span,label { font-family: Arial, "Noto Sans Hebrew", sans-serif; }
-.tioe-title {font-size: 2.0rem; font-weight: 800; color:#102d4d; margin-bottom:2px;}
-.tioe-sub {color:#62758a; margin-bottom:12px;}
-.hero-card {background:white;border:1px solid #dce5ef;border-radius:16px;padding:17px 19px;min-height:145px;box-shadow:0 3px 12px rgba(16,45,77,.06)}
-.hero-kicker {font-size:.78rem;font-weight:800;color:#718096;margin-bottom:8px}
-.hero-value {font-size:2.05rem;font-weight:850;color:#102d4d;line-height:1.05}
-.hero-label {font-size:1rem;font-weight:800;color:#263d56;margin-top:9px}
-.hero-note {font-size:.80rem;color:#7c8b99;margin-top:8px;line-height:1.4}
+.block-container { padding-top: 1.35rem; padding-bottom: 2rem; max-width: 1650px; }
+
+/* Global Streamlit typography */
+h1 { font-size: 2.25rem !important; line-height:1.2 !important; font-weight:800 !important; }
+h2 { font-size: 1.85rem !important; line-height:1.25 !important; font-weight:800 !important; }
+h3 { font-size: 1.45rem !important; line-height:1.3 !important; font-weight:750 !important; }
+h4 { font-size: 1.22rem !important; font-weight:750 !important; }
+p, li, label, [data-testid="stMarkdownContainer"], [data-testid="stCaptionContainer"] { font-size: 1rem; line-height:1.65; }
+[data-testid="stCaptionContainer"] { font-size:.88rem !important; color:#68788b; }
+[data-baseweb="select"] * { font-size:1rem !important; }
+[data-testid="stTextInput"] input, [data-testid="stSelectbox"] div { font-size:1rem !important; }
+[data-testid="stTabs"] button { font-size:1rem !important; font-weight:700 !important; }
+[data-testid="stDataFrame"] { font-size:.94rem !important; }
+button[kind="primary"], button[kind="secondary"] { font-size:1rem !important; font-weight:700 !important; }
+
+.tioe-title {font-size: 2.45rem; line-height:1.15; font-weight: 800; color:#102d4d; margin-bottom:6px;}
+.tioe-sub {font-size:1.05rem; color:#62758a; margin-bottom:14px; line-height:1.55;}
+.hero-card {background:white;border:1px solid #dce5ef;border-radius:16px;padding:20px 22px;min-height:158px;box-shadow:0 3px 12px rgba(16,45,77,.06)}
+.hero-kicker {font-size:.92rem;font-weight:800;color:#718096;margin-bottom:9px}
+.hero-value {font-size:2.55rem;font-weight:800;color:#102d4d;line-height:1.04}
+.hero-label {font-size:1.12rem;font-weight:800;color:#263d56;margin-top:10px;line-height:1.45}
+.hero-note {font-size:.91rem;color:#708093;margin-top:9px;line-height:1.55}
 .hero-red .hero-value {color:#e53935}.hero-blue .hero-value{color:#1769e0}.hero-green .hero-value{color:#14915f}
-.metric-card {background:white;border:1px solid #dde6f0;border-radius:14px;padding:13px 15px;min-height:108px;box-shadow:0 2px 9px rgba(16,45,77,.05)}
-.metric-value {font-size:1.58rem;font-weight:800;color:#102d4d;line-height:1.05}
-.metric-label {font-size:.93rem;font-weight:700;color:#263d56;margin-top:8px}
-.metric-note {font-size:.76rem;color:#7c8b99;margin-top:7px}
-.coverage-note {background:#fff8e8;border:1px solid #f0d69a;border-radius:12px;padding:10px 12px;font-size:.83rem;color:#6f5718}
-.case-card {background:white;border:1px solid #dce5ef;border-radius:14px;padding:16px 18px;box-shadow:0 2px 9px rgba(16,45,77,.05)}
-.case-title {font-size:1.13rem;font-weight:800;color:#102d4d}
-.case-big {font-size:1.75rem;font-weight:850;color:#14915f}
-.note {font-size:.80rem;color:#718096}
-.decision-card {background:#eef5ff;border:1px solid #cddff8;border-radius:14px;padding:16px 18px;min-height:142px}
-.review-card {background:#fff8e8;border:1px solid #f0d69a;border-radius:14px;padding:16px 18px;min-height:142px}
-.prov-card {background:white;border:1px solid #dce5ef;border-radius:14px;padding:14px 16px}
-.check-row {padding:7px 0;border-bottom:1px solid #edf1f5;font-size:.9rem}
+.metric-card {background:white;border:1px solid #dde6f0;border-radius:14px;padding:16px 17px;min-height:122px;box-shadow:0 2px 9px rgba(16,45,77,.05)}
+.metric-value {font-size:1.92rem;font-weight:800;color:#102d4d;line-height:1.05}
+.metric-label {font-size:1.04rem;font-weight:700;color:#263d56;margin-top:9px;line-height:1.45}
+.metric-note {font-size:.87rem;color:#718096;margin-top:8px;line-height:1.5}
+.coverage-note {background:#fff8e8;border:1px solid #f0d69a;border-radius:12px;padding:12px 14px;font-size:.96rem;color:#6f5718;line-height:1.55}
+.case-card {background:white;border:1px solid #dce5ef;border-radius:14px;padding:19px 20px;box-shadow:0 2px 9px rgba(16,45,77,.05);min-height:150px}
+.case-card h3 { margin-top:8px !important; margin-bottom:10px !important; font-size:1.42rem !important; }
+.case-title {font-size:1.12rem;font-weight:800;color:#102d4d;line-height:1.4}
+.case-big {font-size:2.15rem;font-weight:800;color:#14915f;line-height:1.1}
+.note {font-size:.91rem;color:#718096;line-height:1.55}
+.decision-card {background:#eef5ff;border:1px solid #cddff8;border-radius:14px;padding:19px 20px;min-height:154px}
+.review-card {background:#fff8e8;border:1px solid #f0d69a;border-radius:14px;padding:19px 20px;min-height:154px}
+.prov-card {background:white;border:1px solid #dce5ef;border-radius:14px;padding:16px 18px}
+.check-row {padding:10px 0;border-bottom:1px solid #edf1f5;font-size:1rem;line-height:1.55}
 .check-row:last-child{border-bottom:none}
-.formula-box {background:#f7fafc;border:1px solid #dfe7ef;border-radius:10px;padding:10px 12px;font-family:monospace;direction:ltr;text-align:left}
+.formula-box {background:#f7fafc;border:1px solid #dfe7ef;border-radius:10px;padding:13px 14px;font-family:"Consolas","Courier New",monospace !important;font-size:.98rem;direction:ltr;text-align:left;line-height:1.55}
 </style>
 """, unsafe_allow_html=True)
 
@@ -243,7 +261,7 @@ with tab_opps:
                 )
             with tier_col:
                 st.markdown(
-                    f'<div class="review-card"><div class="hero-kicker">Decision Tier</div><div class="hero-value" style="font-size:1.65rem;color:#9a6700">{row.get("decision_tier", "REVIEW")}</div><div class="hero-note">Physical feasibility: <b>{row.get("physical_feasibility", "UNAVAILABLE")}</b><br>לכן ההזדמנות אינה ACTIONABLE בשלב זה.</div></div>',
+                    f'<div class="review-card"><div class="hero-kicker">רמת החלטה</div><div class="hero-value" style="font-size:1.65rem;color:#9a6700">{row.get("decision_tier", "REVIEW")}</div><div class="hero-note">ישימות פיזית: <b>{row.get("physical_feasibility", "UNAVAILABLE")}</b><br>כל עוד הישימות אינה ידועה, ההזדמנות נשארת REVIEW.</div></div>',
                     unsafe_allow_html=True,
                 )
 
@@ -260,7 +278,7 @@ with tab_opps:
 
             formula_left, formula_right = st.columns([1, 1])
             with formula_left:
-                st.markdown("#### איך חושב ה-benefit?")
+                st.markdown("#### איך חושבה התועלת?")
                 st.markdown(
                     f'<div class="formula-box">Net Coverage Gain = {row["recipient_demand"]:,.1f} - {row["donor_demand"]:,.1f} = {row["relocation_gain"]:,.1f} boardings/day</div>',
                     unsafe_allow_html=True,
@@ -295,7 +313,7 @@ with tab_opps:
             st.pydeck_chart(pair_deck, use_container_width=True)
             st.caption(f"כחול = סככה קיימת · אדום = תחנת יעד · אין קו התאמה על המפה · מרחק אווירי מחושב: {row['distance_m']:,.0f} מ׳ (מידע בלבד).")
 
-            st.markdown("#### Provenance / עקבות חישוב")
+            st.markdown("#### מקור הנתונים ועקבות החישוב")
             prov = pd.DataFrame([
                 ["סוג תשתית — מקור", "OBSERVED", "Stations.xlsx · shed_structure=2"],
                 ["סוג תשתית — יעד", "OBSERVED", "Stations.xlsx · shed_structure=1"],
@@ -306,7 +324,7 @@ with tab_opps:
                 ["הקצאת סככה", "CALCULATED", "one-to-one allocation; כל סככה פעם אחת בלבד"],
                 ["Physical feasibility", "UNAVAILABLE", "נדרשת בדיקת שטח/תשתית"],
                 ["Decision Tier", "CALCULATED", "REVIEW כל עוד physical feasibility = UNAVAILABLE"],
-            ], columns=["Metric", "Provenance", "Basis"])
+            ], columns=["מדד", "מקור", "בסיס החישוב"])
             st.dataframe(prov, use_container_width=True, hide_index=True)
 
             status_col, note_col = st.columns([1, 2])
@@ -324,14 +342,36 @@ with tab_opps:
 
             st.markdown("#### כל ההזדמנויות בעיר")
             table = opps.copy()
+            # v0.8.1 UI stability: older/mixed snapshots may not yet contain the
+            # inspector-only fields. Missing feasibility data must never crash the
+            # page; it remains explicitly UNAVAILABLE and therefore REVIEW.
+            defaults = {
+                "system_status": "CURRENT",
+                "user_status": "טרם נבדקה",
+                "recipient_name": "—",
+                "donor_name": "—",
+                "relocation_gain": np.nan,
+                "decision_tier": "REVIEW",
+                "physical_feasibility": "UNAVAILABLE",
+            }
+            for col_name, default_value in defaults.items():
+                if col_name not in table.columns:
+                    table[col_name] = default_value
+                else:
+                    table[col_name] = table[col_name].fillna(default_value)
+
             table["מערכת"] = table["system_status"].map(SYSTEM_HE).fillna(table["system_status"])
             table["טיפול"] = table["user_status"]
             table["יעד"] = table["recipient_name"]
             table["סככה מוצעת"] = table["donor_name"]
-            table["תוספת נטו"] = table["relocation_gain"].round(1)
-            table["Decision Tier"] = table["decision_tier"]
-            table["Physical Feasibility"] = table["physical_feasibility"]
-            st.dataframe(table[["opportunity_id","מערכת","טיפול","יעד","סככה מוצעת","תוספת נטו","Decision Tier","Physical Feasibility"]], use_container_width=True, hide_index=True)
+            table["תוספת נטו"] = pd.to_numeric(table["relocation_gain"], errors="coerce").round(1)
+            table["רמת החלטה"] = table["decision_tier"]
+            table["ישימות פיזית"] = table["physical_feasibility"]
+            st.dataframe(
+                table[["opportunity_id","מערכת","טיפול","יעד","סככה מוצעת","תוספת נטו","רמת החלטה","ישימות פיזית"]],
+                use_container_width=True,
+                hide_index=True,
+            )
 
 with tab_changes:
     st.markdown("## מה השתנה מאז ה-Snapshot הקודם?")
