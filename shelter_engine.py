@@ -17,6 +17,8 @@
 # - Adds lightweight snapshot history / change monitor for recurring portfolio review.
 # - Keeps Decision Tier = REVIEW because physical relocation feasibility is UNAVAILABLE.
 
+SHELTER_ENGINE_VERSION = "0.7.1"
+
 import os
 import re
 import html

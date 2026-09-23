@@ -10,6 +10,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+PORTFOLIO_VERSION = "0.7.1"
+
 from shelter_engine import (
     DiscoveryConfig,
     find_stations_file,
