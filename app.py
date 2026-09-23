@@ -8,17 +8,41 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pydeck as pdk
 
-from portfolio import (
-    run_portfolio,
-    city_metrics,
-    city_history,
-    city_opportunities,
-    map_points,
-    save_current_snapshot,
-    save_opportunity_state,
-)
+import portfolio as portfolio_module
 
-APP_VERSION = "0.7"
+# v0.7.1 deployment-integrity guard. Streamlit Community Cloud can otherwise
+# fail with an opaque ImportError when app.py and portfolio.py come from mixed
+# commits. Keep the public portfolio API backward-compatible and validate it
+# explicitly before binding the names used by the UI.
+_REQUIRED_PORTFOLIO_API = (
+    "run_portfolio",
+    "city_metrics",
+    "city_history",
+    "city_opportunities",
+    "map_points",
+    "save_current_snapshot",
+    "save_opportunity_state",
+)
+_missing_portfolio_api = [
+    name for name in _REQUIRED_PORTFOLIO_API
+    if not hasattr(portfolio_module, name)
+]
+if _missing_portfolio_api:
+    raise ImportError(
+        "TIOE Shelter deployment mismatch: portfolio.py is missing required "
+        f"exports: {', '.join(_missing_portfolio_api)}. "
+        "Replace app.py, portfolio.py and shelter_engine.py from the same release."
+    )
+
+run_portfolio = portfolio_module.run_portfolio
+city_metrics = portfolio_module.city_metrics
+city_history = portfolio_module.city_history
+city_opportunities = portfolio_module.city_opportunities
+map_points = portfolio_module.map_points
+save_current_snapshot = portfolio_module.save_current_snapshot
+save_opportunity_state = portfolio_module.save_opportunity_state
+
+APP_VERSION = "0.7.1"
 USER_STATUSES = ["טרם נבדקה", "בבדיקה", "נדרשת בדיקת שטח", "אושרה", "יושמה", "לא רלוונטית"]
 SYSTEM_HE = {
     "NEW": "חדשה",
