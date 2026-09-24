@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import html
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -48,7 +49,7 @@ historical_city_replay = portfolio_module.historical_city_replay
 compare_historical_replay_to_current = portfolio_module.compare_historical_replay_to_current
 load_historical_station_demand = portfolio_module.load_historical_station_demand
 
-APP_VERSION = "0.9"
+APP_VERSION = "0.9.4"
 USER_STATUSES = ["טרם נבדקה", "בבדיקה", "נדרשת בדיקת שטח", "אושרה", "יושמה", "לא רלוונטית"]
 SYSTEM_HE = {
     "NEW": "חדשה",
@@ -115,6 +116,28 @@ button[kind="primary"], button[kind="secondary"] { font-size:1rem !important; fo
 .check-row {padding:10px 0;border-bottom:1px solid #edf1f5;font-size:1rem;line-height:1.55}
 .check-row:last-child{border-bottom:none}
 .formula-box {background:#f7fafc;border:1px solid #dfe7ef;border-radius:10px;padding:13px 14px;font-family:"Consolas","Courier New",monospace !important;font-size:.98rem;direction:ltr;text-align:left;line-height:1.55}
+
+/* v0.9.4 Historical Comparison Visual Layer */
+.compare-hero {background:linear-gradient(135deg,#ffffff 0%,#f4f8ff 100%);border:1px solid #d7e3f2;border-radius:18px;padding:22px 24px;margin:8px 0 18px;box-shadow:0 4px 14px rgba(16,45,77,.06)}
+.compare-hero-title {font-size:1.7rem;font-weight:800;color:#102d4d;line-height:1.25;margin-bottom:8px}
+.compare-hero-summary {font-size:1.08rem;color:#40556d;line-height:1.65}
+.sim-tag {display:inline-block;background:#e8f1ff;color:#1456a0;border:1px solid #c6daf6;border-radius:999px;padding:5px 10px;font-size:.82rem;font-weight:800;margin-bottom:10px}
+.delta-card {background:white;border:1px solid #dce5ef;border-radius:15px;padding:17px 18px;min-height:148px;box-shadow:0 2px 9px rgba(16,45,77,.05)}
+.delta-label {font-size:.92rem;color:#6c7f93;font-weight:800;margin-bottom:8px}
+.delta-current {font-size:2rem;color:#102d4d;font-weight:800;line-height:1.05}
+.delta-baseline {font-size:.9rem;color:#7c8da0;margin-top:8px}
+.delta-change {font-size:1.08rem;font-weight:800;margin-top:8px}
+.delta-good {color:#14865b}.delta-bad {color:#d64545}.delta-neutral {color:#1769e0}
+.status-strip {display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 18px}
+.status-chip {background:white;border:1px solid #dce5ef;border-radius:999px;padding:8px 12px;font-size:.9rem;font-weight:800;color:#31465d}
+.status-chip strong {font-size:1.05rem;margin-right:4px}
+.status-new {border-color:#bcd6fb;background:#eef5ff}.status-up {border-color:#bfe5d2;background:#effaf4}.status-stable {background:#f6f8fb}.status-down {border-color:#f1d7a8;background:#fff8e9}.status-out {border-color:#e1dce7;background:#f6f3f8}
+.mover-card {background:white;border:1px solid #dce5ef;border-radius:14px;padding:17px 18px;min-height:185px;box-shadow:0 2px 9px rgba(16,45,77,.05)}
+.mover-kicker {font-size:.84rem;font-weight:800;color:#6e8092;margin-bottom:7px}
+.mover-title {font-size:1.12rem;font-weight:800;color:#102d4d;line-height:1.4;margin-bottom:8px}
+.mover-gain {font-size:1.65rem;font-weight:800;line-height:1.1;margin:7px 0}
+.mover-note {font-size:.88rem;color:#728296;line-height:1.5}
+.section-kicker {font-size:.88rem;color:#6d7f92;font-weight:800;margin-top:3px}
 </style>
 """, unsafe_allow_html=True)
 
@@ -127,7 +150,7 @@ def load_data(path: str):
 
 @st.cache_data(show_spinner=False, ttl=86400)
 def load_historical_api(year: int, station_ids: tuple[str, ...]):
-    # v0.9.2: cache is scoped to year + selected city's StationIds. The API
+    # v0.9.3: cache is scoped to year + selected city's StationIds. The API
     # query never needs to load the full national historical resource.
     return load_historical_station_demand(int(year), station_ids=station_ids)
 
@@ -392,14 +415,13 @@ with tab_opps:
             )
 
 with tab_changes:
-    st.markdown("## השוואה היסטורית של ביקוש")
-    st.write("השוואת 2024/2025 למצב הנוכחי באמצעות נתוני תיקופים רשמיים ברמת תחנה.")
-    st.info("חשוב: למאגרים ההיסטוריים יש ביקוש תחנתי, אך כאן לא נטען שמלאי הסככות ההיסטורי ידוע. לכן זהו **Historical Demand Replay**: ביקוש היסטורי מורץ על מלאי התשתית הנוכחי. התוצאה מסומנת SIMULATED.")
+    st.markdown("## מה השתנה?")
+    st.write("השוואה ויזואלית בין ביקוש היסטורי לבין המצב הנוכחי, לצד שינויי Snapshot של TIOE.")
 
     hist_year = st.selectbox("שנת ביקוש להשוואה", [2025, 2024], index=0, key="historical_year")
     load_hist = st.checkbox("טען נתוני API היסטוריים", value=False, key="load_historical_api")
     if not load_hist:
-        st.caption("הטעינה אינה אוטומטית כדי לא להאט את האפליקציה. לאחר הטעינה התוצאה נשמרת ב-cache למשך 24 שעות.")
+        st.info("בחר שנה וסמן את טעינת ה-API כדי לבנות Historical Demand Replay. לאחר הטעינה התוצאה נשמרת ב-cache למשך 24 שעות.")
     else:
         try:
             with st.spinner(f"מוריד ומעבד את מאגר התיקופים לשנת {hist_year}..."):
@@ -423,45 +445,176 @@ with tab_changes:
                 hm = replay["metrics"]
                 cov = replay.get("coverage", {})
                 current_m = metrics
-                hc = st.columns(5)
-                hc[0].metric(f"עליות ללא סככה — ריפליי {hist_year}", f"{hm.get('unsheltered_boardings_replay',0):,.0f}", help="SIMULATED: ביקוש היסטורי על תשתית נוכחית")
-                hc[1].metric("מצב נוכחי", f"{current_m['unsheltered_boardings']:,.0f}")
-                delta_uns = current_m['unsheltered_boardings'] - hm.get('unsheltered_boardings_replay',0)
-                hc[2].metric("שינוי בעליות ללא סככה", f"{delta_uns:+,.0f}")
-                hc[3].metric(f"הזדמנויות — {hist_year}", int(hm.get('active_opportunities_replay',0)))
-                hc[4].metric("הזדמנויות נוכחיות", int(current_m['active_opportunities']))
+                hist_uns = float(hm.get("unsheltered_boardings_replay", 0) or 0)
+                current_uns = float(current_m["unsheltered_boardings"] or 0)
+                delta_uns = current_uns - hist_uns
+                hist_opps = int(hm.get("active_opportunities_replay", 0) or 0)
+                current_opps = int(current_m["active_opportunities"] or 0)
+                delta_opps = current_opps - hist_opps
 
-                st.caption(
-                    f"Resource ID: {replay.get('resource_id','')} · "
-                    f"שורות מקור שנמשכו: {replay.get('raw_row_count',0):,} · "
-                    f"תחנות נוכחיות עם התאמת ביקוש היסטורי: {cov.get('matched_current_stops',0):,}/{cov.get('current_stops',0):,}. "
-                    "Historical OnDay = CALCULATED from OBSERVED daily validations; replay = SIMULATED."
+                if delta_uns < -0.5:
+                    uns_sentence = f"כיום יש {abs(delta_uns):,.0f} פחות עליות ביום בתחנות ללא סככה לעומת ריפליי {hist_year}."
+                    uns_cls = "delta-good"
+                elif delta_uns > 0.5:
+                    uns_sentence = f"כיום יש {abs(delta_uns):,.0f} יותר עליות ביום בתחנות ללא סככה לעומת ריפליי {hist_year}."
+                    uns_cls = "delta-bad"
+                else:
+                    uns_sentence = f"היקף העליות ללא סככה כמעט ללא שינוי לעומת ריפליי {hist_year}."
+                    uns_cls = "delta-neutral"
+
+                opp_sentence = (
+                    f"מספר ההזדמנויות השתנה מ-{hist_opps} ל-{current_opps}."
+                    if hist_opps != current_opps else
+                    f"מספר ההזדמנויות נשאר {current_opps}."
                 )
+                st.markdown(
+                    f'<div class="compare-hero"><div class="sim-tag">SIMULATED · ביקוש היסטורי על מלאי תשתית נוכחי</div>'
+                    f'<div class="compare-hero-title">{html.escape(str(city))} — מה השתנה מאז {hist_year}?</div>'
+                    f'<div class="compare-hero-summary">{uns_sentence} {opp_sentence}</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+                if hist_cmp is None or hist_cmp.empty:
+                    counts_hist = pd.Series(dtype=int)
+                else:
+                    counts_hist = hist_cmp["historical_status"].value_counts()
+
+                new_n = int(counts_hist.get("NEW_SINCE_HISTORICAL_REPLAY", 0))
+                up_n = int(counts_hist.get("STRENGTHENED", 0))
+                stable_n = int(counts_hist.get("PERSISTING_STABLE", 0))
+                down_n = int(counts_hist.get("WEAKENED", 0))
+                out_n = int(counts_hist.get("NO_LONGER_CURRENT_OPPORTUNITY", 0))
+
+                cards = st.columns(4)
+                cards[0].markdown(
+                    f'<div class="delta-card"><div class="delta-label">עליות ביום בתחנות ללא סככה</div>'
+                    f'<div class="delta-current">{current_uns:,.0f}</div>'
+                    f'<div class="delta-baseline">{hist_year}: {hist_uns:,.0f}</div>'
+                    f'<div class="delta-change {uns_cls}">{delta_uns:+,.0f} לעומת {hist_year}</div></div>',
+                    unsafe_allow_html=True,
+                )
+                cards[1].markdown(
+                    f'<div class="delta-card"><div class="delta-label">הזדמנויות פעילות</div>'
+                    f'<div class="delta-current">{current_opps}</div>'
+                    f'<div class="delta-baseline">{hist_year}: {hist_opps}</div>'
+                    f'<div class="delta-change delta-neutral">{delta_opps:+d} שינוי נטו</div></div>',
+                    unsafe_allow_html=True,
+                )
+                cards[2].markdown(
+                    f'<div class="delta-card"><div class="delta-label">נכנסו / יצאו מהסט</div>'
+                    f'<div class="delta-current">{new_n} / {out_n}</div>'
+                    f'<div class="delta-baseline">חדשות / כבר אינן נוכחיות</div>'
+                    f'<div class="delta-change delta-neutral">שינוי בהרכב הפורטפוליו</div></div>',
+                    unsafe_allow_html=True,
+                )
+                matched = int(cov.get("matched_current_stops", 0) or 0)
+                total_current = int(cov.get("current_stops", 0) or 0)
+                match_pct = (100.0 * matched / total_current) if total_current else np.nan
+                match_value = f"{match_pct:.1f}%" if pd.notna(match_pct) else "—"
+                match_baseline = f"{matched:,}/{total_current:,} תחנות" if total_current else "UNAVAILABLE"
+                match_note = "CALCULATED · matching coverage" if total_current else "אין מכנה תקף"
+                cards[3].markdown(
+                    f'<div class="delta-card"><div class="delta-label">כיסוי התאמת ביקוש היסטורי</div>'
+                    f'<div class="delta-current">{match_value}</div>'
+                    f'<div class="delta-baseline">{match_baseline}</div>'
+                    f'<div class="delta-change delta-neutral">{match_note}</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown("### הרכב השינוי בהזדמנויות")
+                st.markdown(
+                    '<div class="status-strip">'
+                    f'<span class="status-chip status-new">חדשות <strong>{new_n}</strong></span>'
+                    f'<span class="status-chip status-up">התחזקו <strong>{up_n}</strong></span>'
+                    f'<span class="status-chip status-stable">יציבות <strong>{stable_n}</strong></span>'
+                    f'<span class="status-chip status-down">נחלשו <strong>{down_n}</strong></span>'
+                    f'<span class="status-chip status-out">יצאו <strong>{out_n}</strong></span>'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+
+                chart_cols = st.columns(2)
+                with chart_cols[0]:
+                    st.markdown("#### חשיפה ללא סככה — לפני/היום")
+                    df_uns = pd.DataFrame({
+                        "תקופה": [str(hist_year), "היום"],
+                        "עליות ביום": [hist_uns, current_uns],
+                    })
+                    fig_uns = px.bar(df_uns, x="תקופה", y="עליות ביום", text="עליות ביום")
+                    fig_uns.update_traces(texttemplate="%{text:,.0f}", textposition="outside")
+                    fig_uns.update_layout(height=315, margin=dict(l=10, r=10, t=10, b=10), showlegend=False, yaxis_title="עליות/יום", xaxis_title="")
+                    st.plotly_chart(fig_uns, use_container_width=True, config={"displayModeBar": False})
+                with chart_cols[1]:
+                    st.markdown("#### הזדמנויות פעילות — לפני/היום")
+                    df_opp = pd.DataFrame({"תקופה": [str(hist_year), "היום"], "הזדמנויות": [hist_opps, current_opps]})
+                    fig_opp = px.bar(df_opp, x="תקופה", y="הזדמנויות", text="הזדמנויות")
+                    fig_opp.update_traces(textposition="outside")
+                    fig_opp.update_layout(height=315, margin=dict(l=10, r=10, t=10, b=10), showlegend=False, yaxis_title="מספר הזדמנויות", xaxis_title="")
+                    st.plotly_chart(fig_opp, use_container_width=True, config={"displayModeBar": False})
 
                 if hist_cmp is None or hist_cmp.empty:
                     st.info("אין הזדמנויות להשוואה בעיר שנבחרה.")
                 else:
-                    counts_hist = hist_cmp["historical_status"].value_counts()
-                    cc = st.columns(5)
-                    cc[0].metric("חדשות", int(counts_hist.get("NEW_SINCE_HISTORICAL_REPLAY",0)))
-                    cc[1].metric("התחזקו", int(counts_hist.get("STRENGTHENED",0)))
-                    cc[2].metric("נחלשו", int(counts_hist.get("WEAKENED",0)))
-                    cc[3].metric("יצאו", int(counts_hist.get("NO_LONGER_CURRENT_OPPORTUNITY",0)))
-                    cc[4].metric("יציבות", int(counts_hist.get("PERSISTING_STABLE",0)))
+                    st.markdown("### השינויים הבולטים")
+                    cmp2 = hist_cmp.copy()
+                    cmp2["_delta"] = pd.to_numeric(cmp2["gain_delta"], errors="coerce")
+                    priority = {
+                        "STRENGTHENED": 0,
+                        "WEAKENED": 1,
+                        "NEW_SINCE_HISTORICAL_REPLAY": 2,
+                        "NO_LONGER_CURRENT_OPPORTUNITY": 3,
+                        "PERSISTING_STABLE": 4,
+                    }
+                    cmp2["_priority"] = cmp2["historical_status"].map(priority).fillna(9)
+                    cmp2["_abs_delta"] = cmp2["_delta"].abs().fillna(-1)
+                    movers = cmp2.sort_values(["_priority", "_abs_delta"], ascending=[True, False]).head(4)
+                    mover_cols = st.columns(min(4, max(1, len(movers))))
+                    status_label = {
+                        "STRENGTHENED": "התחזקה",
+                        "WEAKENED": "נחלשה",
+                        "NEW_SINCE_HISTORICAL_REPLAY": "חדשה",
+                        "NO_LONGER_CURRENT_OPPORTUNITY": "יצאה מהסט",
+                        "PERSISTING_STABLE": "יציבה",
+                    }
+                    for col, (_, r) in zip(mover_cols, movers.iterrows()):
+                        stat = str(r.get("historical_status", ""))
+                        target = html.escape(str(r.get("recipient_name", "")))
+                        delta = pd.to_numeric(pd.Series([r.get("gain_delta")]), errors="coerce").iloc[0]
+                        curr = pd.to_numeric(pd.Series([r.get("current_gain")]), errors="coerce").iloc[0]
+                        histg = pd.to_numeric(pd.Series([r.get("historical_gain")]), errors="coerce").iloc[0]
+                        donor = r.get("current_donor_name") if pd.notna(r.get("current_donor_name")) else r.get("historical_donor_name")
+                        donor = html.escape(str(donor)) if donor is not None and str(donor) != "nan" else "—"
+                        delta_text = "—" if pd.isna(delta) else f"{delta:+,.1f}"
+                        delta_class = "delta-good" if (pd.notna(delta) and delta > 0) else ("delta-bad" if (pd.notna(delta) and delta < 0) else "delta-neutral")
+                        gain_note = f"{hist_year}: {'—' if pd.isna(histg) else f'{histg:,.1f}'} · היום: {'—' if pd.isna(curr) else f'{curr:,.1f}'}"
+                        col.markdown(
+                            f'<div class="mover-card"><div class="mover-kicker">{status_label.get(stat, SYSTEM_HE.get(stat, stat))}</div>'
+                            f'<div class="mover-title">{target}</div>'
+                            f'<div class="mover-gain {delta_class}">{delta_text}</div>'
+                            f'<div class="mover-note">שינוי בתוספת הכיסוי נטו<br>{gain_note}<br>סככה מוצעת כיום: {donor}</div></div>',
+                            unsafe_allow_html=True,
+                        )
 
-                    show_hist = hist_cmp.copy()
-                    show_hist["שינוי"] = show_hist["historical_status"].map(SYSTEM_HE).fillna(show_hist["historical_status"])
-                    show_hist["תחנת יעד"] = show_hist["recipient_name"]
-                    show_hist[f"Gain {hist_year}"] = pd.to_numeric(show_hist["historical_gain"], errors="coerce").round(1)
-                    show_hist["Gain נוכחי"] = pd.to_numeric(show_hist["current_gain"], errors="coerce").round(1)
-                    show_hist["Δ Gain"] = pd.to_numeric(show_hist["gain_delta"], errors="coerce").round(1)
-                    show_hist["סככה מוצעת אז"] = show_hist["historical_donor_name"]
-                    show_hist["סככה מוצעת כיום"] = show_hist["current_donor_name"]
-                    st.dataframe(
-                        show_hist[["שינוי","תחנת יעד",f"Gain {hist_year}","Gain נוכחי","Δ Gain","סככה מוצעת אז","סככה מוצעת כיום"]],
-                        use_container_width=True, hide_index=True,
-                    )
+                    with st.expander("הצג את כל ההזדמנויות והשינויים"):
+                        show_hist = hist_cmp.copy()
+                        show_hist["שינוי"] = show_hist["historical_status"].map(SYSTEM_HE).fillna(show_hist["historical_status"])
+                        show_hist["תחנת יעד"] = show_hist["recipient_name"]
+                        show_hist[f"תועלת {hist_year}"] = pd.to_numeric(show_hist["historical_gain"], errors="coerce").round(1)
+                        show_hist["תועלת נוכחית"] = pd.to_numeric(show_hist["current_gain"], errors="coerce").round(1)
+                        show_hist["שינוי בתועלת"] = pd.to_numeric(show_hist["gain_delta"], errors="coerce").round(1)
+                        show_hist["סככה מוצעת אז"] = show_hist["historical_donor_name"]
+                        show_hist["סככה מוצעת כיום"] = show_hist["current_donor_name"]
+                        st.dataframe(
+                            show_hist[["שינוי","תחנת יעד",f"תועלת {hist_year}","תועלת נוכחית","שינוי בתועלת","סככה מוצעת אז","סככה מוצעת כיום"]],
+                            use_container_width=True, hide_index=True,
+                        )
 
+                st.caption(
+                    f"Resource ID: {replay.get('resource_id','')} · "
+                    f"שורות מקור שנמשכו: {replay.get('raw_row_count',0):,} · "
+                    f"התאמת ביקוש היסטורי: {matched:,}/{total_current:,} תחנות. "
+                    "Historical OnDay = CALCULATED from OBSERVED validations; replay = SIMULATED."
+                )
                 with st.expander("מתודולוגיה ו-Provenance — השוואה היסטורית"):
                     st.markdown(
                         "- `day_1..day_31` הם נתוני מקור נצפים.\n"
@@ -476,6 +629,7 @@ with tab_changes:
 
     st.markdown("---")
     st.markdown("## שינוי מאז Snapshot של TIOE")
+    st.caption("שינוי בין שתי ריצות TIOE על מקורות נתונים שונים — נפרד מה-Historical Demand Replay.")
     if result.changes is None or result.changes.empty:
         st.info("עדיין אין בסיס להשוואה. שמור Snapshot ראשון בלשונית היסטוריה, ולאחר עדכון מקור הנתונים שמור Snapshot נוסף.")
     else:
@@ -484,22 +638,30 @@ with tab_changes:
             st.info("לא זוהו שינויי הזדמנויות בעיר בהשוואה הזמינה.")
         else:
             counts = ch["change_status"].value_counts()
-            cs = st.columns(4)
-            vals = [
-                (int(counts.get("NEW",0)), "הזדמנויות חדשות"),
-                (int(counts.get("PERSISTING",0)), "הזדמנויות נמשכות"),
-                (int(counts.get("RESOLVED_INFRASTRUCTURE_CHANGED",0)), "שינוי תשתית זוהה"),
-                (int(counts.get("NO_LONGER_PRIORITY_CANDIDATE",0)+counts.get("DROPPED_FROM_CURRENT_SET",0)), "יצאו מהסט הנוכחי"),
-            ]
-            for col,(v,lbl) in zip(cs,vals):
-                col.metric(lbl,v)
+            snap_new = int(counts.get("NEW", 0))
+            snap_persist = int(counts.get("PERSISTING", 0))
+            snap_infra = int(counts.get("RESOLVED_INFRASTRUCTURE_CHANGED", 0))
+            snap_out = int(counts.get("NO_LONGER_PRIORITY_CANDIDATE", 0) + counts.get("DROPPED_FROM_CURRENT_SET", 0))
+            st.markdown(
+                '<div class="status-strip">'
+                f'<span class="status-chip status-new">חדשות <strong>{snap_new}</strong></span>'
+                f'<span class="status-chip status-stable">נמשכות <strong>{snap_persist}</strong></span>'
+                f'<span class="status-chip status-up">שינוי תשתית <strong>{snap_infra}</strong></span>'
+                f'<span class="status-chip status-out">יצאו <strong>{snap_out}</strong></span>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
             show = ch.copy()
             show["סטטוס"] = show["change_status"].map(SYSTEM_HE).fillna(show["change_status"])
             show["תחנת יעד"] = show["recipient_name"]
-            show["Gain קודם"] = pd.to_numeric(show["previous_gain"], errors="coerce").round(1)
-            show["Gain נוכחי"] = pd.to_numeric(show["current_gain"], errors="coerce").round(1)
-            show["שינוי Gain"] = pd.to_numeric(show["gain_delta"], errors="coerce").round(1)
-            st.dataframe(show[["סטטוס","תחנת יעד","previous_donor_name","current_donor_name","Gain קודם","Gain נוכחי","שינוי Gain"]], use_container_width=True, hide_index=True)
+            show["תועלת קודמת"] = pd.to_numeric(show["previous_gain"], errors="coerce").round(1)
+            show["תועלת נוכחית"] = pd.to_numeric(show["current_gain"], errors="coerce").round(1)
+            show["שינוי בתועלת"] = pd.to_numeric(show["gain_delta"], errors="coerce").round(1)
+            with st.expander("הצג את כל שינויי ה-Snapshot", expanded=snap_new <= 8):
+                st.dataframe(
+                    show[["סטטוס","תחנת יעד","previous_donor_name","current_donor_name","תועלת קודמת","תועלת נוכחית","שינוי בתועלת"]],
+                    use_container_width=True, hide_index=True,
+                )
 
         if impact.get("available"):
             st.markdown("### פירוק השינוי בכיסוי")
@@ -538,7 +700,7 @@ with tab_history:
             fig.update_layout(height=330, margin=dict(l=10,r=10,t=20,b=10))
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-    st.warning("ב-Community Cloud אחסון קבצים מקומי אינו מסד נתונים קבוע ועלול להימחק בעת redeploy/restart. ב-v0.9.2 זה עדיין מתאים ל-POC; לפני שימוש ארגוני נעביר את ה-registry וה-snapshots לאחסון מתמשך.")
+    st.warning("ב-Community Cloud אחסון קבצים מקומי אינו מסד נתונים קבוע ועלול להימחק בעת redeploy/restart. ב-v0.9.3 זה עדיין מתאים ל-POC; לפני שימוש ארגוני נעביר את ה-registry וה-snapshots לאחסון מתמשך.")
 
 with st.expander("מתודולוגיה ו-Provenance"):
     st.markdown("""
