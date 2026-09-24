@@ -11,11 +11,10 @@ import numpy as np
 import pandas as pd
 import requests
 
-HISTORICAL_ENGINE_VERSION = "0.9.2"
+HISTORICAL_ENGINE_VERSION = "0.9.3"
 DATASTORE_URL = "https://data.gov.il/api/3/action/datastore_search"
-DATASTORE_SQL_URL = "https://data.gov.il/api/3/action/datastore_search_sql"
 DEFAULT_PAGE_SIZE = 5000
-SQL_STATION_CHUNK_SIZE = 40
+STATION_FILTER_CHUNK_SIZE = 40
 
 # Official station-validation resources supplied for TIOE Shelter historical demand.
 HISTORICAL_RESOURCES = {
@@ -129,32 +128,34 @@ def fetch_datastore_resource(
 
 
 
-def _sql_literal(value: str) -> str:
-    """Return a conservative SQL literal for CKAN datastore_search_sql."""
+def _typed_station_filter_value(value: str):
+    """Match CKAN field types conservatively for StationId filters."""
     s = _clean_id(value)
-    if not s:
-        return "NULL"
     if s.lstrip("-").isdigit():
-        return s
-    return "'" + s.replace("'", "''") + "'"
+        try:
+            return int(s)
+        except Exception:
+            pass
+    return s
 
 
 def fetch_datastore_resource_for_stations(
     resource_id: str,
     station_ids: Iterable[str],
     *,
-    chunk_size: int = SQL_STATION_CHUNK_SIZE,
+    chunk_size: int = STATION_FILTER_CHUNK_SIZE,
     page_size: int = DEFAULT_PAGE_SIZE,
     timeout_sec: int = 45,
     max_retries: int = 3,
     session: Optional[requests.Session] = None,
 ) -> pd.DataFrame:
-    """Fetch only requested StationId rows through CKAN SQL.
+    """Fetch only requested StationId rows through CKAN datastore_search.
 
-    v0.9.1 memory-safety rule: the Streamlit app must never download the full
-    national historical resource merely to analyze one city. Station IDs are
-    taken from the CURRENT city's audited station crosswalk and queried in
-    bounded groups. This keeps both network traffic and peak RAM bounded.
+    v0.9.3 compatibility fix: data.gov.il exposes datastore_search but the
+    datastore_search_sql action returned HTTP 404 in production. CKAN's normal
+    datastore_search supports list-valued filters, which are equivalent to a
+    WHERE IN condition. We POST nested JSON filters so the request stays short
+    and only rows for the selected city's stations are returned.
     """
     ids = []
     seen = set()
@@ -169,31 +170,33 @@ def fetch_datastore_resource_for_stations(
     sess = session or requests.Session()
     frames: list[pd.DataFrame] = []
     wanted_cols = [
-        '"StationId"', '"StationName"', '"year_key"', '"month_key"',
-        *[f'"day_{i}"' for i in range(1, 32)],
+        "StationId", "StationName", "year_key", "month_key",
+        *[f"day_{i}" for i in range(1, 32)],
     ]
-    select_cols = ",".join(wanted_cols)
-    table = '"' + str(resource_id).replace('"', '""') + '"'
 
     for start in range(0, len(ids), int(chunk_size)):
         chunk = ids[start:start + int(chunk_size)]
-        literals = ",".join(_sql_literal(v) for v in chunk)
+        filter_values = [_typed_station_filter_value(v) for v in chunk]
         offset = 0
         while True:
-            sql = (
-                f"SELECT {select_cols} FROM {table} "
-                f'WHERE "StationId" IN ({literals}) '
-                f"LIMIT {int(page_size)} OFFSET {int(offset)}"
-            )
+            body = {
+                "resource_id": str(resource_id),
+                "filters": {"StationId": filter_values},
+                "fields": wanted_cols,
+                "limit": int(page_size),
+                "offset": int(offset),
+                "include_total": True,
+                "records_format": "objects",
+            }
             payload = None
             last_exc = None
             for attempt in range(int(max_retries)):
                 try:
-                    resp = sess.get(DATASTORE_SQL_URL, params={"sql": sql}, timeout=timeout_sec)
+                    resp = sess.post(DATASTORE_URL, json=body, timeout=timeout_sec)
                     resp.raise_for_status()
                     payload = resp.json()
                     if not payload.get("success"):
-                        raise RuntimeError(f"CKAN SQL success=false: {payload}")
+                        raise RuntimeError(f"CKAN datastore_search success=false: {payload}")
                     break
                 except Exception as exc:
                     last_exc = exc
@@ -201,16 +204,33 @@ def fetch_datastore_resource_for_stations(
                         time.sleep(0.8 * (attempt + 1))
             if payload is None:
                 raise RuntimeError(
-                    f"Historical API query failed for station chunk {start // int(chunk_size) + 1}: {last_exc}"
+                    f"Historical API query failed for station chunk "
+                    f"{start // int(chunk_size) + 1}: {last_exc}"
                 )
 
-            batch = (payload.get("result", {}) or {}).get("records", []) or []
+            result = payload.get("result", {}) or {}
+            batch = result.get("records", []) or []
             if batch:
                 frames.append(pd.DataFrame.from_records(batch))
             got = len(batch)
-            if got < int(page_size):
+            if got == 0:
                 break
             offset += got
+
+            total = result.get("total")
+            if total is not None:
+                try:
+                    if offset >= int(total):
+                        break
+                except Exception:
+                    pass
+            effective_limit = result.get("limit", page_size)
+            try:
+                effective_limit = int(effective_limit)
+            except Exception:
+                effective_limit = int(page_size)
+            if got < max(1, effective_limit):
+                break
 
     if not frames:
         return pd.DataFrame()
@@ -387,8 +407,8 @@ def load_historical_station_demand(
                 seen.add(sid)
                 ids.append(sid)
         normalized_parts = []
-        for start in range(0, len(ids), SQL_STATION_CHUNK_SIZE):
-            part_ids = ids[start:start + SQL_STATION_CHUNK_SIZE]
+        for start in range(0, len(ids), STATION_FILTER_CHUNK_SIZE):
+            part_ids = ids[start:start + STATION_FILTER_CHUNK_SIZE]
             raw_part = fetch_datastore_resource_for_stations(
                 rid, part_ids, chunk_size=max(1, len(part_ids)), session=session
             )
