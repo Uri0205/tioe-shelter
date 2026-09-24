@@ -127,7 +127,7 @@ def load_data(path: str):
 
 @st.cache_data(show_spinner=False, ttl=86400)
 def load_historical_api(year: int, station_ids: tuple[str, ...]):
-    # v0.9.1: cache is scoped to year + selected city's StationIds. The API
+    # v0.9.2: cache is scoped to year + selected city's StationIds. The API
     # query never needs to load the full national historical resource.
     return load_historical_station_demand(int(year), station_ids=station_ids)
 
@@ -538,7 +538,7 @@ with tab_history:
             fig.update_layout(height=330, margin=dict(l=10,r=10,t=20,b=10))
             st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-    st.warning("ב-Community Cloud אחסון קבצים מקומי אינו מסד נתונים קבוע ועלול להימחק בעת redeploy/restart. ב-v0.9.1 זה עדיין מתאים ל-POC; לפני שימוש ארגוני נעביר את ה-registry וה-snapshots לאחסון מתמשך.")
+    st.warning("ב-Community Cloud אחסון קבצים מקומי אינו מסד נתונים קבוע ועלול להימחק בעת redeploy/restart. ב-v0.9.2 זה עדיין מתאים ל-POC; לפני שימוש ארגוני נעביר את ה-registry וה-snapshots לאחסון מתמשך.")
 
 with st.expander("מתודולוגיה ו-Provenance"):
     st.markdown("""
